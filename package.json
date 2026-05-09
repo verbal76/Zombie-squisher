@@ -18,7 +18,6 @@
     "expo-font": "~13.0.4",
     "expo-gl": "~15.0.5",
     "expo-status-bar": "~2.0.0",
-    "expo-three": "^8.0.0",
     "expo-updates": "~0.26.0",
     "expo-haptics": "~14.0.0",
     "react": "18.3.1",
