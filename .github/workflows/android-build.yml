@@ -21,6 +21,8 @@ jobs:
   build:
     name: Build APK on GitHub runner
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       EXPO_TOKEN: ${{ secrets.ZOMBIE }}
     steps:
@@ -83,9 +85,12 @@ jobs:
           path: build/zombie-squisher.${{ steps.profile.outputs.outext }}
           retention-days: 90
 
-      - name: Attach to GitHub Release (tagged builds only)
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: build/zombie-squisher.${{ steps.profile.outputs.outext }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('apk-build-{0}', github.run_number) }}
+          name: "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('APK build #{0}', github.run_number) }}"
+          prerelease: false
+          make_latest: "true"
           generate_release_notes: true
