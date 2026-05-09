@@ -21,14 +21,27 @@ interface Props {
 
 const { width: WIN_W, height: WIN_H } = Dimensions.get('window');
 
+const STICK_BASE = 130;
+const STICK_KNOB = 58;
+const STICK_RADIUS = (STICK_BASE - STICK_KNOB) / 2;
+const STICK_MARGIN = 24;
+
+const BTN_SIZE = 78;
+const BTN_GAP = 12;
+
 export function GameScreen({ progress, onEnd }: Props) {
   const playW = WIN_W;
   const playH = WIN_H - 120;
   const worldRef = useRef<World>(createWorld(playW, playH, progress));
   const steerRef = useRef(0);
+  const steerYRef = useRef(0);
+  const throttleRef = useRef(false);
+  const brakeRef = useRef(false);
+  const fireRef = useRef(false);
   const abilityTriggerRef = useRef(false);
   const [, setTick] = useState(0);
   const [exited, setExited] = useState(false);
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
 
   const vehicle = VEHICLES[progress.selectedVehicle];
   const ability = ABILITIES[progress.selectedAbility];
@@ -41,7 +54,19 @@ export function GameScreen({ progress, onEnd }: Props) {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const w = worldRef.current;
-      step(w, dt, { steer: steerRef.current, triggerAbility: abilityTriggerRef.current }, progress);
+      step(
+        w,
+        dt,
+        {
+          steer: steerRef.current,
+          steerY: steerYRef.current,
+          throttle: throttleRef.current,
+          brake: brakeRef.current,
+          fire: fireRef.current,
+          triggerAbility: abilityTriggerRef.current,
+        },
+        progress,
+      );
       abilityTriggerRef.current = false;
       setTick((t) => (t + 1) % 1000000);
       if (w.gameOver && !exited) {
@@ -55,14 +80,27 @@ export function GameScreen({ progress, onEnd }: Props) {
     return () => cancelAnimationFrame(raf);
   }, [progress, exited, onEnd]);
 
-  const onTouch = (e: GestureResponderEvent) => {
-    const x = e.nativeEvent.locationX;
-    const center = playW / 2;
-    const norm = Math.max(-1, Math.min(1, (x - center) / (playW / 2)));
-    steerRef.current = norm;
+  const handleStick = (e: GestureResponderEvent) => {
+    const cx = STICK_BASE / 2;
+    const cy = STICK_BASE / 2;
+    const dx = e.nativeEvent.locationX - cx;
+    const dy = e.nativeEvent.locationY - cy;
+    const dist = Math.hypot(dx, dy);
+    const max = STICK_RADIUS;
+    let kx = dx;
+    let ky = dy;
+    if (dist > max) {
+      kx = (dx / dist) * max;
+      ky = (dy / dist) * max;
+    }
+    setKnob({ x: kx, y: ky });
+    steerRef.current = Math.max(-1, Math.min(1, kx / max));
+    steerYRef.current = Math.max(-1, Math.min(1, ky / max));
   };
-  const onTouchEnd = () => {
+  const releaseStick = () => {
+    setKnob({ x: 0, y: 0 });
     steerRef.current = 0;
+    steerYRef.current = 0;
   };
 
   const w = worldRef.current;
@@ -85,12 +123,8 @@ export function GameScreen({ progress, onEnd }: Props) {
 
   return (
     <View style={styles.root}>
-      <Pressable
+      <View
         style={[styles.play, { width: playW, height: playH, transform: [{ translateX: shakeX }, { translateY: shakeY }] }]}
-        onTouchStart={onTouch}
-        onTouchMove={onTouch}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchEnd}
       >
         <View style={[styles.shoulder, { left: 0 }]} />
         <View style={[styles.shoulder, { right: 0 }]} />
@@ -117,43 +151,60 @@ export function GameScreen({ progress, onEnd }: Props) {
         {w.zombies.map((z) => {
           const def = ZOMBIE_DEFS[z.kind];
           const isBoss = z.kind === 'boss';
+          const side = z.size * 2;
+          const depth = isBoss ? 14 : 8;
+          const dark = shade(def.color, -0.45);
           return (
-            <View
-              key={z.id}
-              style={{
-                position: 'absolute',
-                left: z.x - z.size,
-                top: z.y - z.size,
-                width: z.size * 2,
-                height: z.size * 2,
-                borderRadius: z.size,
-                backgroundColor: def.color,
-                borderWidth: isBoss ? 3 : 2,
-                borderColor: def.ringColor ?? '#1a1a1a',
-              }}
-            >
-              {isBoss && (
-                <View
-                  style={{
-                    position: 'absolute',
-                    left: -4,
-                    right: -4,
-                    bottom: -10,
-                    height: 4,
-                    backgroundColor: '#2a0e0e',
-                    borderRadius: 2,
-                  }}
-                >
+            <React.Fragment key={z.id}>
+              <View
+                style={{
+                  position: 'absolute',
+                  left: z.x - z.size + depth * 0.4,
+                  top: z.y - z.size + depth,
+                  width: side,
+                  height: side,
+                  backgroundColor: dark,
+                  borderWidth: isBoss ? 3 : 2,
+                  borderColor: def.ringColor ?? '#0a0a0a',
+                  borderRadius: 3,
+                }}
+              />
+              <View
+                style={{
+                  position: 'absolute',
+                  left: z.x - z.size,
+                  top: z.y - z.size,
+                  width: side,
+                  height: side,
+                  borderRadius: 3,
+                  backgroundColor: def.color,
+                  borderWidth: isBoss ? 3 : 2,
+                  borderColor: def.ringColor ?? '#1a1a1a',
+                }}
+              >
+                {isBoss && (
                   <View
                     style={{
-                      width: `${Math.max(0, (z.hp / z.maxHp) * 100)}%`,
-                      height: '100%',
-                      backgroundColor: '#ff5555',
+                      position: 'absolute',
+                      left: -4,
+                      right: -4,
+                      bottom: -10,
+                      height: 4,
+                      backgroundColor: '#2a0e0e',
+                      borderRadius: 2,
                     }}
-                  />
-                </View>
-              )}
-            </View>
+                  >
+                    <View
+                      style={{
+                        width: `${Math.max(0, (z.hp / z.maxHp) * 100)}%`,
+                        height: '100%',
+                        backgroundColor: '#ff5555',
+                      }}
+                    />
+                  </View>
+                )}
+              </View>
+            </React.Fragment>
           );
         })}
 
@@ -176,6 +227,19 @@ export function GameScreen({ progress, onEnd }: Props) {
           );
         })}
 
+        <View
+          style={{
+            position: 'absolute',
+            left: w.carX - vehicle.width / 2 + 5,
+            top: w.carY - vehicle.height / 2 + 12,
+            width: vehicle.width,
+            height: vehicle.height,
+            backgroundColor: shade(vehicle.color, -0.5),
+            borderRadius: 8,
+            borderWidth: 2,
+            borderColor: '#000',
+          }}
+        />
         <View
           style={{
             position: 'absolute',
@@ -220,7 +284,7 @@ export function GameScreen({ progress, onEnd }: Props) {
             />
           </>
         )}
-      </Pressable>
+      </View>
 
       <View style={styles.hud}>
         <View style={styles.hudRow}>
@@ -230,6 +294,58 @@ export function GameScreen({ progress, onEnd }: Props) {
         <View style={styles.hpBar}>
           <View style={[styles.hpFill, { width: `${hpPct * 100}%` }]} />
         </View>
+      </View>
+
+      <View style={[styles.stickBase, { left: STICK_MARGIN, bottom: STICK_MARGIN }]}>
+        <View
+          style={StyleSheet.absoluteFill}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderGrant={handleStick}
+          onResponderMove={handleStick}
+          onResponderRelease={releaseStick}
+          onResponderTerminate={releaseStick}
+        />
+        <View
+          pointerEvents="none"
+          style={[
+            styles.stickKnob,
+            {
+              left: STICK_BASE / 2 - STICK_KNOB / 2 + knob.x,
+              top: STICK_BASE / 2 - STICK_KNOB / 2 + knob.y,
+            },
+          ]}
+        />
+      </View>
+
+      <View
+        style={[
+          styles.cluster,
+          { right: STICK_MARGIN, bottom: STICK_MARGIN, width: BTN_SIZE * 2 + BTN_GAP, height: BTN_SIZE * 2 + BTN_GAP },
+        ]}
+        pointerEvents="box-none"
+      >
+        <Pressable
+          onPressIn={() => (fireRef.current = true)}
+          onPressOut={() => (fireRef.current = false)}
+          style={[styles.btn, styles.btnFire, { left: 0, top: 0, width: BTN_SIZE, height: BTN_SIZE }]}
+        >
+          <Text style={styles.btnText}>FIRE</Text>
+        </Pressable>
+        <Pressable
+          onPressIn={() => (brakeRef.current = true)}
+          onPressOut={() => (brakeRef.current = false)}
+          style={[styles.btn, styles.btnBrake, { left: 0, top: BTN_SIZE + BTN_GAP, width: BTN_SIZE, height: BTN_SIZE }]}
+        >
+          <Text style={styles.btnText}>BRAKE</Text>
+        </Pressable>
+        <Pressable
+          onPressIn={() => (throttleRef.current = true)}
+          onPressOut={() => (throttleRef.current = false)}
+          style={[styles.btn, styles.btnGas, { left: BTN_SIZE + BTN_GAP, top: BTN_SIZE + BTN_GAP, width: BTN_SIZE, height: BTN_SIZE }]}
+        >
+          <Text style={styles.btnText}>GAS</Text>
+        </Pressable>
       </View>
 
       {progress.selectedAbility !== 'none' && (
@@ -247,6 +363,16 @@ export function GameScreen({ progress, onEnd }: Props) {
       )}
     </View>
   );
+}
+
+function shade(hex: string, amount: number): string {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.replace('#', ''));
+  if (!m) return hex;
+  const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
+  const r = clamp(parseInt(m[1], 16) * (1 + amount));
+  const g = clamp(parseInt(m[2], 16) * (1 + amount));
+  const b = clamp(parseInt(m[3], 16) * (1 + amount));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
 function projectileStyle(kind: string) {
@@ -269,7 +395,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     bottom: 0,
-    width: 12,
+    width: 6,
     backgroundColor: '#3a3a2a',
   },
   laneStripe: {
@@ -314,13 +440,59 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   hpFill: { height: '100%', backgroundColor: '#e34a4a' },
+  stickBase: {
+    position: 'absolute',
+    width: STICK_BASE,
+    height: STICK_BASE,
+    borderRadius: STICK_BASE / 2,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  stickKnob: {
+    position: 'absolute',
+    width: STICK_KNOB,
+    height: STICK_KNOB,
+    borderRadius: STICK_KNOB / 2,
+    backgroundColor: 'rgba(255,210,74,0.85)',
+    borderWidth: 2,
+    borderColor: '#000',
+  },
+  cluster: {
+    position: 'absolute',
+  },
+  btn: {
+    position: 'absolute',
+    borderRadius: 16,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnGas: {
+    backgroundColor: 'rgba(60,180,90,0.85)',
+    borderColor: '#0a3a18',
+  },
+  btnBrake: {
+    backgroundColor: 'rgba(220,80,80,0.85)',
+    borderColor: '#3a0a0a',
+  },
+  btnFire: {
+    backgroundColor: 'rgba(255,180,40,0.9)',
+    borderColor: '#3a2a00',
+  },
+  btnText: {
+    color: '#000',
+    fontWeight: '900',
+    fontSize: 16,
+    letterSpacing: 1,
+  },
   abilityBtn: {
     position: 'absolute',
     right: 16,
-    bottom: 24,
+    top: 80,
     backgroundColor: '#222',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 2,
     borderColor: '#ffd24a',
