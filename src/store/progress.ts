@@ -6,7 +6,7 @@ import { SIDE_MODS } from '../data/sideMods';
 
 const KEY = 'zs:progress:v2';
 
-const ZERO: UpgradeStats = { speed: 0, armor: 0, handling: 0 };
+const ZERO: UpgradeStats = { speed: 0, armor: 0, handling: 0, acceleration: 0 };
 
 const allUpgrades: Record<VehicleId, UpgradeStats> = VEHICLE_LIST.reduce((acc, v) => {
   acc[v.id] = { ...ZERO };
@@ -37,7 +37,6 @@ export async function loadProgress(): Promise<Progress> {
       ...parsed,
       upgrades: { ...DEFAULT_PROGRESS.upgrades, ...(parsed.upgrades ?? {}) },
     };
-    // Make sure stale saves don't end up selecting a vehicle that no longer exists.
     if (!VEHICLES[merged.selectedVehicle]) merged.selectedVehicle = 'hatchback';
     return merged;
   } catch {
