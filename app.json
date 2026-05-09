@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Zombie Squisher",
+    "slug": "zombie-squisher",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "zombiesquisher",
+    "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/PLACEHOLDER_PROJECT_ID",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.verbal76.zombiesquisher"
+    },
+    "android": {
+      "package": "com.verbal76.zombiesquisher",
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0a0a"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-updates"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "PLACEHOLDER_PROJECT_ID"
+      }
+    }
+  }
+}

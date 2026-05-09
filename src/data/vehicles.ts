@@ -1,0 +1,61 @@
+import { Vehicle, VehicleId } from '../types';
+
+export const VEHICLES: Record<VehicleId, Vehicle> = {
+  hatchback: {
+    id: 'hatchback',
+    name: 'Rust Bucket',
+    color: '#7a5c3b',
+    baseSpeed: 220,
+    baseArmor: 30,
+    baseHandling: 280,
+    killCost: 0,
+    width: 46,
+    height: 78,
+  },
+  pickup: {
+    id: 'pickup',
+    name: 'Pickup',
+    color: '#3d6b3d',
+    baseSpeed: 240,
+    baseArmor: 50,
+    baseHandling: 240,
+    killCost: 250,
+    width: 52,
+    height: 92,
+  },
+  muscle: {
+    id: 'muscle',
+    name: 'Muscle Car',
+    color: '#a82626',
+    baseSpeed: 320,
+    baseArmor: 35,
+    baseHandling: 360,
+    killCost: 800,
+    width: 48,
+    height: 86,
+  },
+  tank: {
+    id: 'tank',
+    name: 'Battle Tank',
+    color: '#3a3a2c',
+    baseSpeed: 180,
+    baseArmor: 200,
+    baseHandling: 180,
+    killCost: 2500,
+    width: 64,
+    height: 96,
+  },
+  apc: {
+    id: 'apc',
+    name: 'Reaper APC',
+    color: '#1f1f1f',
+    baseSpeed: 260,
+    baseArmor: 120,
+    baseHandling: 260,
+    killCost: 6000,
+    width: 58,
+    height: 100,
+  },
+};
+
+export const VEHICLE_LIST: Vehicle[] = Object.values(VEHICLES);
