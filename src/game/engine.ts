@@ -82,6 +82,9 @@ export function createWorld(width: number, height: number, p: Progress): World {
 
 export interface UpdateInput {
   steer: number;
+  throttle: boolean;
+  brake: boolean;
+  fire: boolean;
   triggerAbility: boolean;
 }
 
@@ -117,13 +120,16 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   }
 
   const isNitro = world.abilityActive > 0 && p.selectedAbility === 'nitro';
-  const speedMul = isNitro ? 2 : 1;
+  const nitroMul = isNitro ? 2 : 1;
+  // Brake wins over gas; default cruise is 1.0.
+  const pedalMul = input.brake ? 0.4 : input.throttle ? 1.5 : 1;
+  const speedMul = nitroMul * pedalMul;
   const bumperBonus = isNitro ? 2 : 1;
   const isShielded = world.invuln > 0 && p.selectedAbility === 'shield' && world.abilityActive > 0;
 
-  // Car steering
-  const targetVx = input.steer * stats.handling * speedMul;
-  world.carVx += (targetVx - world.carVx) * Math.min(1, dt * 8);
+  // Car steering — snappier tween so the car responds quickly to thumbstick.
+  const targetVx = input.steer * stats.handling * 1.6 * nitroMul;
+  world.carVx += (targetVx - world.carVx) * Math.min(1, dt * 20);
   world.carX += world.carVx * dt;
   const halfW = vehicle.width / 2;
   if (world.carX < halfW + 10) {
@@ -162,13 +168,16 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     z.x += Math.sign(dx) * Math.min(Math.abs(dx), chasePull * dt);
   }
 
-  // Fire weapon
-  if (weapon.id !== 'none') {
+  // Fire weapon — only while the player is holding the fire button.
+  if (weapon.id !== 'none' && input.fire) {
     world.fireTimer -= dt * 1000;
     while (world.fireTimer <= 0) {
       fireWeapon(world, weapon, vehicle);
       world.fireTimer += weapon.fireRateMs;
     }
+  } else if (world.fireTimer < 0) {
+    // Reset cadence so the next press starts a fresh shot, not a burst.
+    world.fireTimer = 0;
   }
 
   // Move projectiles
