@@ -1,0 +1,15 @@
+# EAS-only ignore (mirrors .gitignore but does NOT exclude the generated icon
+# assets, since `eas build --local` runs after `npm run prepare-assets` on the
+# CI runner and needs assets/icon.png to exist when expo prebuild reads it).
+node_modules/
+.expo/
+dist/
+web-build/
+ios/
+android/
+*.jks
+*.p12
+*.key
+*.mobileprovision
+.vscode/
+.idea/

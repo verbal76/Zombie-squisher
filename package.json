@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
+    "prepare-assets": "node scripts/make-icon.mjs",
+    "prestart": "npm run prepare-assets",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
@@ -20,6 +22,7 @@
   },
   "devDependencies": {
     "@types/react": "~18.3.12",
+    "pngjs": "^7.0.0",
     "typescript": "^5.3.3"
   },
   "private": true

@@ -7,9 +7,15 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "scheme": "zombiesquisher",
+    "icon": "./assets/icon.png",
     "newArchEnabled": true,
     "runtimeVersion": {
       "policy": "appVersion"
+    },
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0a"
     },
     "updates": {
       "url": "https://u.expo.dev/9b498cb4-2cf6-4604-8d25-3b2d6be0add7",
@@ -23,11 +29,13 @@
     "android": {
       "package": "com.verbal76.zombiesquisher",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0a0a0a"
       }
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/icon.png"
     },
     "plugins": [
       "expo-updates"
