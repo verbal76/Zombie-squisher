@@ -20,3 +20,9 @@ android/
 assets/icon.png
 assets/adaptive-icon.png
 
+# npm lockfile is intentionally NOT committed in this repo. Workflows use
+# `npm install` (not `npm ci`) and skip `cache: npm` on setup-node — both
+# would require a committed lock. Revisit if CI minutes become a constraint.
+package-lock.json
+npm-shrinkwrap.json
+yarn.lock
