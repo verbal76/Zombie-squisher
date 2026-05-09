@@ -1,7 +1,8 @@
 {
   "expo": {
     "name": "Zombie Squisher",
-    "slug": "zombie-squisher",
+    "slug": "zombie",
+    "owner": "hot-attic-games",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -11,7 +12,7 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/PLACEHOLDER_PROJECT_ID",
+      "url": "https://u.expo.dev/9b498cb4-2cf6-4604-8d25-3b2d6be0add7",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
@@ -33,7 +34,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "PLACEHOLDER_PROJECT_ID"
+        "projectId": "9b498cb4-2cf6-4604-8d25-3b2d6be0add7"
       }
     }
   }
