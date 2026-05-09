@@ -34,6 +34,7 @@ export function GameScreen({ progress, onEnd }: Props) {
   const playH = WIN_H - 120;
   const worldRef = useRef<World>(createWorld(playW, playH, progress));
   const steerRef = useRef(0);
+  const steerYRef = useRef(0);
   const throttleRef = useRef(false);
   const brakeRef = useRef(false);
   const fireRef = useRef(false);
@@ -58,6 +59,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         dt,
         {
           steer: steerRef.current,
+          steerY: steerYRef.current,
           throttle: throttleRef.current,
           brake: brakeRef.current,
           fire: fireRef.current,
@@ -94,10 +96,14 @@ export function GameScreen({ progress, onEnd }: Props) {
     }
     setKnob({ x: kx, y: ky });
     steerRef.current = Math.max(-1, Math.min(1, kx / max));
+    // Screen Y is downward, but pushing the stick UP should drive the car UP,
+    // so flip the sign: stick-up (negative dy) → negative steerY → carVy negative.
+    steerYRef.current = Math.max(-1, Math.min(1, ky / max));
   };
   const releaseStick = () => {
     setKnob({ x: 0, y: 0 });
     steerRef.current = 0;
+    steerYRef.current = 0;
   };
 
   const w = worldRef.current;

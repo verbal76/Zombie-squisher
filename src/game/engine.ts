@@ -10,6 +10,7 @@ export interface World {
   carX: number;
   carY: number;
   carVx: number;
+  carVy: number;
   scroll: number;
   speed: number;
   zombies: Zombie[];
@@ -59,6 +60,7 @@ export function createWorld(width: number, height: number, p: Progress): World {
     carX: width / 2,
     carY: height - 140,
     carVx: 0,
+    carVy: 0,
     scroll: 0,
     speed: stats.speed,
     zombies: [],
@@ -82,6 +84,7 @@ export function createWorld(width: number, height: number, p: Progress): World {
 
 export interface UpdateInput {
   steer: number;
+  steerY: number;
   throttle: boolean;
   brake: boolean;
   fire: boolean;
@@ -120,18 +123,27 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   }
 
   const isNitro = world.abilityActive > 0 && p.selectedAbility === 'nitro';
-  const nitroMul = isNitro ? 2 : 1;
-  // Brake wins over gas; default cruise is 1.0.
-  const pedalMul = input.brake ? 0.4 : input.throttle ? 1.5 : 1;
-  const speedMul = nitroMul * pedalMul;
-  const bumperBonus = isNitro ? 2 : 1;
+  const nitroMul = isNitro ? 1.8 : 1;
   const isShielded = world.invuln > 0 && p.selectedAbility === 'shield' && world.abilityActive > 0;
 
-  // Car steering — snappier tween so the car responds quickly to thumbstick.
-  const targetVx = input.steer * stats.handling * 1.6 * nitroMul;
-  world.carVx += (targetVx - world.carVx) * Math.min(1, dt * 20);
+  // Movement model: thumbstick is a 2D direction vector. The car only moves
+  // when the player is holding GAS. BRAKE hard-zeroes velocity (no drift).
+  // No auto-movement — release everything and the car coasts to a stop.
+  if (input.brake) {
+    world.carVx = 0;
+    world.carVy = 0;
+  } else {
+    const driving = input.throttle;
+    const targetVx = driving ? input.steer * stats.speed * nitroMul : 0;
+    const targetVy = driving ? input.steerY * stats.speed * nitroMul : 0;
+    const tween = driving ? 18 : 6; // gas: snap toward target; coast: gentle decel
+    world.carVx += (targetVx - world.carVx) * Math.min(1, dt * tween);
+    world.carVy += (targetVy - world.carVy) * Math.min(1, dt * tween);
+  }
   world.carX += world.carVx * dt;
+  world.carY += world.carVy * dt;
   const halfW = vehicle.width / 2;
+  const halfH = vehicle.height / 2;
   if (world.carX < halfW + 10) {
     world.carX = halfW + 10;
     world.carVx = 0;
@@ -140,10 +152,19 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     world.carX = world.width - halfW - 10;
     world.carVx = 0;
   }
+  if (world.carY < halfH + 60) {
+    world.carY = halfH + 60;
+    world.carVy = 0;
+  }
+  if (world.carY > world.height - halfH - 20) {
+    world.carY = world.height - halfH - 20;
+    world.carVy = 0;
+  }
 
-  const fwd = stats.speed * speedMul;
-  world.speed = fwd;
-  world.scroll += fwd * dt;
+  // Background flow tracks actual car motion so stripes feel like a moving road.
+  world.speed = Math.hypot(world.carVx, world.carVy);
+  world.scroll -= world.carVy * dt;
+  const bumperBonus = isNitro ? 2 : 1;
 
   // Spawn zombies — slow trickle at first, then ramp.
   world.spawnTimer -= dt;
@@ -159,13 +180,15 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     world.nextBossKills += 200 + world.wave * 30;
   }
 
-  // Move zombies — most chase the player; bosses just trudge forward.
+  // Move zombies — they chase the car in 2D (no more world auto-scroll).
   for (const z of world.zombies) {
-    z.y += (fwd + z.vy) * dt;
+    z.y += z.vy * dt;
     z.x += z.vx * dt;
-    const chasePull = z.kind === 'boss' ? 8 : 30;
+    const chasePull = z.kind === 'boss' ? 12 : 40;
     const dx = world.carX - z.x;
+    const dy = world.carY - z.y;
     z.x += Math.sign(dx) * Math.min(Math.abs(dx), chasePull * dt);
+    z.y += Math.sign(dy) * Math.min(Math.abs(dy), chasePull * dt);
   }
 
   // Fire weapon — only while the player is holding the fire button.
@@ -187,9 +210,8 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     pr.life -= dt;
   }
 
-  // Scroll blood spots and fade them
+  // Blood stays on the ground (no auto-scroll); just fade.
   for (const b of world.bloodSpots) {
-    b.y += fwd * dt;
     b.alpha -= dt * 0.15;
   }
 
