@@ -30,6 +30,8 @@ jobs:
   update:
     name: Publish OTA update
     runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.ZOMBIE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +45,7 @@ jobs:
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+          token: ${{ secrets.ZOMBIE }}
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -52,6 +54,8 @@ jobs:
         run: npm run prepare-assets
 
       - name: Publish update
+        env:
+          EXPO_TOKEN: ${{ secrets.ZOMBIE }}
         run: |
           BRANCH="${{ github.event.inputs.branch || 'preview' }}"
           MSG="${{ github.event.inputs.message }}"

@@ -22,7 +22,7 @@ jobs:
     name: Build APK on GitHub runner
     runs-on: ubuntu-latest
     env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_TOKEN: ${{ secrets.ZOMBIE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+          token: ${{ secrets.ZOMBIE }}
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -65,6 +65,8 @@ jobs:
           fi
 
       - name: Build with EAS (local)
+        env:
+          EXPO_TOKEN: ${{ secrets.ZOMBIE }}
         run: |
           mkdir -p build
           eas build \
