@@ -3,22 +3,28 @@ name: EAS Update (OTA)
 on:
   push:
     branches:
-      - main
+      - 'Github-build-pipeline-zombie-crusher'
     paths-ignore:
       - 'README.md'
       - '.github/**'
       - 'eas.json'
       - 'app.json'
+      - 'package.json'
+      - 'package-lock.json'
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Update channel/branch (production | preview | development)'
+        description: 'EAS update channel/branch (preview | production)'
         required: true
-        default: 'production'
+        default: 'preview'
       message:
         description: 'Update message'
         required: false
         default: ''
+
+concurrency:
+  group: eas-update-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   update:
@@ -45,7 +51,7 @@ jobs:
 
       - name: Publish update
         run: |
-          BRANCH="${{ github.event.inputs.branch || 'production' }}"
+          BRANCH="${{ github.event.inputs.branch || 'preview' }}"
           MSG="${{ github.event.inputs.message }}"
           if [ -z "$MSG" ]; then
             MSG="$(git log -1 --pretty=%B | head -n1)"

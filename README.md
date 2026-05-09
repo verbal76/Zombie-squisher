@@ -1,17 +1,29 @@
 # Zombie Squisher
 
-Top-down arcade-y driving game. Run over swarms of zombies. Squish kills upgrade your vehicle, unlock weapons (machine gun, flamethrower, rockets, plasma lance), unlock abilities (nitro, shield, EMP), and unlock new vehicles (pickup, muscle car, tank, APC).
+Top-down arcade-y driving game. Run swarms of zombies over with your bumper, mounted swords slice anything that brushes the doors, weapons (machine gun, flamethrower, rockets, plasma lance) auto-fire forward, and abilities (nitro, shield, EMP) sit on cooldowns. Squishing kills upgrades stats between runs and unlocks more weapons, side mods, abilities, and vehicles.
 
-Built with Expo + React Native. Native builds happen on EAS via GitHub Actions; over-the-air updates ship to your installed builds without going through the stores.
+Built with Expo SDK 52 + React Native 0.76 + TypeScript. Native Android APKs are built **on GitHub's free Ubuntu runner via `eas build --local`** — zero EAS build minutes. JS-only changes ship as OTA updates.
 
-## Stack
+## Branches
 
-- Expo SDK 52 + React Native 0.76 (New Arch)
-- TypeScript
-- AsyncStorage for save data
-- expo-updates for OTA
-- EAS Build for native binaries
-- GitHub Actions for both
+| Branch | Purpose |
+|---|---|
+| `Github-build-pipeline-zombie-crusher` | Primary working branch. Pushes here trigger OTA + APK builds. |
+| `main` | Untouched / not used for active development. |
+
+## Pipelines
+
+### 1. OTA updates — `.github/workflows/eas-update.yml`
+Auto-fires on every push to `Github-build-pipeline-zombie-crusher` (excluding readme/CI/config-only changes). Publishes the JS bundle to the EAS `preview` channel; installed apps with the matching `appVersion` pick it up on next launch. Manual dispatch lets you target the `production` channel instead.
+
+### 2. Native APK builds — `.github/workflows/android-build.yml`
+Runs `eas build --local` on the GitHub-hosted runner — **no EAS build minutes consumed**. Triggers:
+
+- **Push to `Github-build-pipeline-zombie-crusher`** → APK with the `preview` profile, uploaded as a 90-day artifact on the run.
+- **`v*` tag push** → AAB with the `production` profile + an attached GitHub Release for permanent download.
+- **Manual dispatch** → pick the profile.
+
+Only secret required: `EXPO_TOKEN` (already configured).
 
 ## Local development
 
@@ -23,52 +35,25 @@ npm run ios
 npm run typecheck
 ```
 
-## EAS setup (one-time)
+## EAS project
 
-1. Create an Expo account and an `eas` project for this app:
+- **Owner**: `hot-attic-games`
+- **Slug**: `zombie`
+- **Project ID**: `9b498cb4-2cf6-4604-8d25-3b2d6be0add7`
 
-   ```sh
-   npm i -g eas-cli
-   eas login
-   eas init
-   ```
-
-   `eas init` will write a real project ID into `app.json` (`expo.extra.eas.projectId` and `expo.updates.url`). Replace the `PLACEHOLDER_PROJECT_ID` strings if `eas init` doesn't.
-
-2. Create an Expo access token for CI: https://expo.dev/accounts/[acct]/settings/access-tokens
-
-3. Add it to GitHub: **Settings → Secrets and variables → Actions → New repository secret**
-   - Name: `EXPO_TOKEN`
-   - Value: (paste the token)
-
-4. Configure update channels (one-time):
-
-   ```sh
-   eas update:configure
-   eas channel:create production
-   eas channel:create preview
-   ```
-
-   Channels in `eas.json` are wired so `production` builds receive `production` updates, `preview` builds receive `preview` updates, etc.
-
-## CI workflows
-
-- **`.github/workflows/eas-build.yml`** — manual dispatch (`Run workflow` in the Actions tab) or trigger by pushing a `v*` tag. Pick `profile` (`development`/`preview`/`production`) and `platform` (`android`/`ios`/`all`). Native binaries land on the EAS dashboard.
-
-- **`.github/workflows/eas-update.yml`** — runs automatically on every push to `main` (excluding readme/CI/config-only changes) and publishes a JS-only OTA update to the `production` channel. You can also dispatch it manually to push to a different channel.
-
-Typical flow:
-
-- Native code or dependency changes → tag `vX.Y.Z` → EAS build runs → distribute new binaries via TestFlight / Play / internal distribution.
-- JS/asset-only changes → merge to `main` → OTA update runs → installed apps pull the update on next launch.
+Already wired into `app.json` (`expo.owner`, `expo.slug`, `expo.extra.eas.projectId`, `expo.updates.url`).
 
 ## Game design
 
-- **Vehicles**: Rust Bucket → Pickup (250 kills) → Muscle Car (800) → Battle Tank (2,500) → Reaper APC (6,000).
-- **Vehicle stats** (per-vehicle, persisted): Speed / Armor / Handling, 5 upgrade tiers each at 50 / 150 / 400 / 900 / 2,000 kills.
-- **Weapons** unlock from total lifetime kills: MG (50), Flame (250), Rockets (750), Plasma Lance (2,500).
-- **Abilities** unlock from total lifetime kills: Nitro (100), Shield (500), EMP (1,500).
-- **Zombies** scale in HP and spawn rate with the wave counter (every 25 kills). Runners, Brutes, and Spitters appear at deeper waves.
+- **10 vehicles**: Hatchback (free) → Sedan (200) → Coupe (600) → Race Car (1.5k) → Pickup (3k) → Police (6k) → Ambulance (10k) → Taxi (18k) → Heavy Truck (32k) → Battle Tank (60k). Currently rendered as colored placeholder blocks; drop Kenney top-down car/truck PNGs under `assets/cars/` and swap the `View` for an `Image` keyed off `vehicle.assetKey`.
+- **Per-vehicle upgrades**: Speed / Armor / Handling, 5 tiers each at 100 / 400 / 1,200 / 3,500 / 10,000 kills.
+- **Weapons** (forward-firing, auto): MG @ 100 · Flamethrower (placeholder art) @ 500 · Rockets @ 1,500 · Plasma Lance @ 5,000.
+- **Side mods** (kill anything that brushes the doors): Mounted Swords @ 750 · Bone Grinders @ 4,000.
+- **Abilities** (manual button): Nitro @ 200 · Shield @ 1,000 · EMP @ 3,000.
+- **Zombies** trickle in slowly at first then ramp up. Spawn from top + sides; side-spawning increases with wave. Walkers / Runners / Brutes / Spitters appear as you progress.
+- **Mini-bosses** start at wave 9 and re-spawn every couple hundred kills, with a visible HP bar.
+- **Damage** flows both ways — every zombie contact dings the car (clamped by a brief invuln window). Bosses, brutes, and spitters hit hard.
+- **Blood trails** drop from every kill and scroll down behind the car.
 
 ## Project layout
 
@@ -77,10 +62,12 @@ App.tsx                       # scene router + OTA bootstrap
 index.ts                      # Expo entry
 src/
   components/                 # MenuScreen, GameScreen, GarageScreen, GameOverScreen
-  data/                       # vehicles, weapons, abilities, zombies (pure data)
-  game/engine.ts              # game loop, physics, spawning, combat
+  data/                       # vehicles, weapons, abilities, sideMods, zombies (pure data)
+  game/engine.ts              # game loop, physics, spawning, combat, blood trails
   store/progress.ts           # AsyncStorage save/load + economy
   types.ts
-.github/workflows/            # eas-build.yml, eas-update.yml
+.github/workflows/
+  android-build.yml           # GitHub-runner local APK + tagged release
+  eas-update.yml              # OTA publisher
 app.json eas.json             # Expo + EAS configuration
 ```

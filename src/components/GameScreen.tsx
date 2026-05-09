@@ -10,6 +10,7 @@ import {
 import { Progress } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
+import { SIDE_MODS } from '../data/sideMods';
 import { ZOMBIE_DEFS } from '../data/zombies';
 import { World, createWorld, step } from '../game/engine';
 
@@ -31,6 +32,7 @@ export function GameScreen({ progress, onEnd }: Props) {
 
   const vehicle = VEHICLES[progress.selectedVehicle];
   const ability = ABILITIES[progress.selectedAbility];
+  const sideMod = SIDE_MODS[progress.selectedSideMod];
 
   useEffect(() => {
     let raf = 0;
@@ -71,7 +73,7 @@ export function GameScreen({ progress, onEnd }: Props) {
   const lanePixels = useMemo(() => {
     const stripeH = 40;
     const stripes: { y: number }[] = [];
-    const offset = (w.scroll % stripeH);
+    const offset = w.scroll % stripeH;
     for (let y = -stripeH; y < playH + stripeH; y += stripeH) {
       stripes.push({ y: y + offset });
     }
@@ -96,8 +98,25 @@ export function GameScreen({ progress, onEnd }: Props) {
           <View key={i} style={[styles.laneStripe, { top: s.y, left: playW / 2 - 3 }]} />
         ))}
 
+        {w.bloodSpots.map((b) => (
+          <View
+            key={b.id}
+            style={{
+              position: 'absolute',
+              left: b.x - b.size / 2,
+              top: b.y - b.size / 2,
+              width: b.size,
+              height: b.size,
+              borderRadius: b.size / 2,
+              backgroundColor: '#5a0a14',
+              opacity: Math.max(0, Math.min(0.85, b.alpha)),
+            }}
+          />
+        ))}
+
         {w.zombies.map((z) => {
           const def = ZOMBIE_DEFS[z.kind];
+          const isBoss = z.kind === 'boss';
           return (
             <View
               key={z.id}
@@ -109,27 +128,53 @@ export function GameScreen({ progress, onEnd }: Props) {
                 height: z.size * 2,
                 borderRadius: z.size,
                 backgroundColor: def.color,
-                borderWidth: 2,
-                borderColor: '#1a1a1a',
+                borderWidth: isBoss ? 3 : 2,
+                borderColor: def.ringColor ?? '#1a1a1a',
+              }}
+            >
+              {isBoss && (
+                <View
+                  style={{
+                    position: 'absolute',
+                    left: -4,
+                    right: -4,
+                    bottom: -10,
+                    height: 4,
+                    backgroundColor: '#2a0e0e',
+                    borderRadius: 2,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: `${Math.max(0, (z.hp / z.maxHp) * 100)}%`,
+                      height: '100%',
+                      backgroundColor: '#ff5555',
+                    }}
+                  />
+                </View>
+              )}
+            </View>
+          );
+        })}
+
+        {w.projectiles.map((pr) => {
+          const style = projectileStyle(pr.kind);
+          return (
+            <View
+              key={pr.id}
+              style={{
+                position: 'absolute',
+                left: pr.x - style.w / 2,
+                top: pr.y - style.h / 2,
+                width: style.w,
+                height: style.h,
+                backgroundColor: style.color,
+                borderRadius: style.r,
+                opacity: style.opacity,
               }}
             />
           );
         })}
-
-        {w.projectiles.map((pr) => (
-          <View
-            key={pr.id}
-            style={{
-              position: 'absolute',
-              left: pr.x - 2,
-              top: pr.y - 6,
-              width: 4,
-              height: 12,
-              backgroundColor: '#ffd24a',
-              borderRadius: 2,
-            }}
-          />
-        ))}
 
         <View
           style={{
@@ -147,6 +192,34 @@ export function GameScreen({ progress, onEnd }: Props) {
           <View style={styles.windshield} />
           <View style={styles.bumper} />
         </View>
+        {sideMod.reach > 0 && (
+          <>
+            <View
+              style={{
+                position: 'absolute',
+                left: w.carX - vehicle.width / 2 - sideMod.reach,
+                top: w.carY - vehicle.height / 2 + 10,
+                width: sideMod.reach,
+                height: vehicle.height - 20,
+                backgroundColor: '#bfbfbf',
+                borderWidth: 1,
+                borderColor: '#222',
+              }}
+            />
+            <View
+              style={{
+                position: 'absolute',
+                left: w.carX + vehicle.width / 2,
+                top: w.carY - vehicle.height / 2 + 10,
+                width: sideMod.reach,
+                height: vehicle.height - 20,
+                backgroundColor: '#bfbfbf',
+                borderWidth: 1,
+                borderColor: '#222',
+              }}
+            />
+          </>
+        )}
       </Pressable>
 
       <View style={styles.hud}>
@@ -174,6 +247,19 @@ export function GameScreen({ progress, onEnd }: Props) {
       )}
     </View>
   );
+}
+
+function projectileStyle(kind: string) {
+  switch (kind) {
+    case 'flame':
+      return { w: 14, h: 18, color: '#ff7a1a', r: 7, opacity: 0.85 };
+    case 'rocket':
+      return { w: 6, h: 16, color: '#ff3a3a', r: 3, opacity: 1 };
+    case 'laser':
+      return { w: 4, h: 36, color: '#9cf2ff', r: 2, opacity: 0.9 };
+    default:
+      return { w: 4, h: 12, color: '#ffd24a', r: 2, opacity: 1 };
+  }
 }
 
 const styles = StyleSheet.create({

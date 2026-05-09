@@ -1,8 +1,9 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Progress, UpgradeStats, VehicleId, WeaponId, AbilityId } from '../types';
+import { Progress, UpgradeStats, WeaponId, AbilityId, SideModId } from '../types';
 import { VEHICLES, VEHICLE_LIST } from '../data/vehicles';
 import { WEAPONS, WEAPON_LIST, ABILITIES, ABILITY_LIST } from '../data/weapons';
+import { SIDE_MODS, SIDE_MOD_LIST } from '../data/sideMods';
 import { buyUpgrade, buyVehicle, MAX_UPGRADE, upgradeCost } from '../store/progress';
 
 interface Props {
@@ -22,7 +23,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Section title="VEHICLES">
+        <Section title="VEHICLES (placeholder blocks — Kenney art slots in later)">
           {VEHICLE_LIST.map((v) => {
             const owned = progress.unlockedVehicles.includes(v.id);
             const selected = progress.selectedVehicle === v.id;
@@ -57,7 +58,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
 
         <Section title={`UPGRADE: ${VEHICLES[progress.selectedVehicle].name.toUpperCase()}`}>
           {(['speed', 'armor', 'handling'] as (keyof UpgradeStats)[]).map((stat) => {
-            const lvl = progress.upgrades[progress.selectedVehicle][stat];
+            const lvl = progress.upgrades[progress.selectedVehicle]?.[stat] ?? 0;
             const cost = upgradeCost(lvl);
             const maxed = cost === null;
             const can = !maxed && progress.totalKills >= (cost ?? 0);
@@ -92,7 +93,13 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
                 key={w.id}
                 style={[styles.card, selected && styles.cardSelected, !unlocked && styles.cardLocked]}
                 onPress={() => {
-                  if (unlocked) onChange({ ...progress, selectedWeapon: w.id as WeaponId, unlockedWeapons: Array.from(new Set([...progress.unlockedWeapons, w.id as WeaponId])) });
+                  if (unlocked) {
+                    onChange({
+                      ...progress,
+                      selectedWeapon: w.id as WeaponId,
+                      unlockedWeapons: Array.from(new Set([...progress.unlockedWeapons, w.id as WeaponId])),
+                    });
+                  }
                 }}
               >
                 <View style={[styles.swatch, { backgroundColor: '#ffd24a' }]} />
@@ -100,6 +107,36 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
                   <Text style={styles.cardTitle}>{w.name}</Text>
                   <Text style={styles.cardMeta}>{w.description}</Text>
                   {!unlocked && <Text style={styles.cost}>Unlocks at {w.unlockKills} total kills</Text>}
+                  {unlocked && selected && <Text style={styles.selectedTag}>EQUIPPED</Text>}
+                </View>
+              </Pressable>
+            );
+          })}
+        </Section>
+
+        <Section title="SIDE MODS">
+          {SIDE_MOD_LIST.map((s) => {
+            const unlocked = progress.unlockedSideMods.includes(s.id) || progress.totalKills >= s.unlockKills;
+            const selected = progress.selectedSideMod === s.id;
+            return (
+              <Pressable
+                key={s.id}
+                style={[styles.card, selected && styles.cardSelected, !unlocked && styles.cardLocked]}
+                onPress={() => {
+                  if (unlocked) {
+                    onChange({
+                      ...progress,
+                      selectedSideMod: s.id as SideModId,
+                      unlockedSideMods: Array.from(new Set([...progress.unlockedSideMods, s.id as SideModId])),
+                    });
+                  }
+                }}
+              >
+                <View style={[styles.swatch, { backgroundColor: '#bfbfbf' }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardTitle}>{s.name}</Text>
+                  <Text style={styles.cardMeta}>{s.description}</Text>
+                  {!unlocked && <Text style={styles.cost}>Unlocks at {s.unlockKills} total kills</Text>}
                   {unlocked && selected && <Text style={styles.selectedTag}>EQUIPPED</Text>}
                 </View>
               </Pressable>
@@ -116,7 +153,13 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
                 key={a.id}
                 style={[styles.card, selected && styles.cardSelected, !unlocked && styles.cardLocked]}
                 onPress={() => {
-                  if (unlocked) onChange({ ...progress, selectedAbility: a.id as AbilityId, unlockedAbilities: Array.from(new Set([...progress.unlockedAbilities, a.id as AbilityId])) });
+                  if (unlocked) {
+                    onChange({
+                      ...progress,
+                      selectedAbility: a.id as AbilityId,
+                      unlockedAbilities: Array.from(new Set([...progress.unlockedAbilities, a.id as AbilityId])),
+                    });
+                  }
                 }}
               >
                 <View style={[styles.swatch, { backgroundColor: '#4ad1ff' }]} />

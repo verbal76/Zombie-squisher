@@ -1,0 +1,87 @@
+name: Android APK (GitHub Runner)
+
+on:
+  push:
+    branches:
+      - 'Github-build-pipeline-zombie-crusher'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'EAS build profile (preview = APK, production = AAB)'
+        required: true
+        default: 'preview'
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build APK on GitHub runner
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Determine profile
+        id: profile
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "profile=production" >> "$GITHUB_OUTPUT"
+            echo "outext=aab" >> "$GITHUB_OUTPUT"
+          else
+            echo "profile=${{ github.event.inputs.profile || 'preview' }}" >> "$GITHUB_OUTPUT"
+            echo "outext=apk" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build with EAS (local)
+        run: |
+          mkdir -p build
+          eas build \
+            --platform android \
+            --profile ${{ steps.profile.outputs.profile }} \
+            --local \
+            --non-interactive \
+            --output build/zombie-squisher.${{ steps.profile.outputs.outext }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zombie-squisher-${{ steps.profile.outputs.profile }}-${{ github.run_number }}
+          path: build/zombie-squisher.${{ steps.profile.outputs.outext }}
+          retention-days: 90
+
+      - name: Attach to GitHub Release (tagged builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/zombie-squisher.${{ steps.profile.outputs.outext }}
+          generate_release_notes: true

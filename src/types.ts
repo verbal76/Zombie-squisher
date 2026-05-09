@@ -1,12 +1,25 @@
-export type VehicleId = 'hatchback' | 'pickup' | 'muscle' | 'tank' | 'apc';
+export type VehicleId =
+  | 'hatchback'
+  | 'sedan'
+  | 'coupe'
+  | 'race'
+  | 'pickup'
+  | 'police'
+  | 'ambulance'
+  | 'taxi'
+  | 'truck'
+  | 'tank';
 export type WeaponId = 'none' | 'mg' | 'flame' | 'rockets' | 'laser';
 export type AbilityId = 'none' | 'nitro' | 'shield' | 'emp';
-export type ZombieKind = 'walker' | 'runner' | 'brute' | 'spitter';
+export type SideModId = 'none' | 'swords' | 'grinders';
+export type ZombieKind = 'walker' | 'runner' | 'brute' | 'spitter' | 'boss';
 
 export interface Vehicle {
   id: VehicleId;
   name: string;
   color: string;
+  /** Placeholder string for the Kenney asset path you'll wire in later. */
+  assetKey: string;
   baseSpeed: number;
   baseArmor: number;
   baseHandling: number;
@@ -33,6 +46,15 @@ export interface Ability {
   description: string;
 }
 
+export interface SideMod {
+  id: SideModId;
+  name: string;
+  unlockKills: number;
+  damage: number;
+  reach: number;
+  description: string;
+}
+
 export interface UpgradeStats {
   speed: number;
   armor: number;
@@ -45,9 +67,11 @@ export interface Progress {
   unlockedVehicles: VehicleId[];
   unlockedWeapons: WeaponId[];
   unlockedAbilities: AbilityId[];
+  unlockedSideMods: SideModId[];
   selectedVehicle: VehicleId;
   selectedWeapon: WeaponId;
   selectedAbility: AbilityId;
+  selectedSideMod: SideModId;
   upgrades: Record<VehicleId, UpgradeStats>;
 }
 
@@ -63,9 +87,21 @@ export interface Entity {
 export interface Zombie extends Entity {
   kind: ZombieKind;
   size: number;
+  maxHp: number;
 }
+
+export type ProjectileKind = 'mg' | 'flame' | 'rocket' | 'laser';
 
 export interface Projectile extends Entity {
   damage: number;
   life: number;
+  kind: ProjectileKind;
+}
+
+export interface BloodSpot {
+  id: number;
+  x: number;
+  y: number;
+  size: number;
+  alpha: number;
 }

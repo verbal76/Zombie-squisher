@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Progress } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { WEAPONS, ABILITIES } from '../data/weapons';
+import { SIDE_MODS } from '../data/sideMods';
 
 interface Props {
   progress: Progress;
@@ -14,6 +15,7 @@ export function MenuScreen({ progress, onPlay, onGarage }: Props) {
   const v = VEHICLES[progress.selectedVehicle];
   const w = WEAPONS[progress.selectedWeapon];
   const a = ABILITIES[progress.selectedAbility];
+  const s = SIDE_MODS[progress.selectedSideMod];
   return (
     <View style={styles.root}>
       <Text style={styles.title}>ZOMBIE</Text>
@@ -29,6 +31,7 @@ export function MenuScreen({ progress, onPlay, onGarage }: Props) {
         <Text style={styles.loadoutTitle}>LOADOUT</Text>
         <Text style={styles.loadoutLine}>Vehicle: <Text style={styles.loadoutVal}>{v.name}</Text></Text>
         <Text style={styles.loadoutLine}>Weapon: <Text style={styles.loadoutVal}>{w.name}</Text></Text>
+        <Text style={styles.loadoutLine}>Sides: <Text style={styles.loadoutVal}>{s.name}</Text></Text>
         <Text style={styles.loadoutLine}>Ability: <Text style={styles.loadoutVal}>{a.name}</Text></Text>
       </View>
 

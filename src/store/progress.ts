@@ -1,11 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Progress, VehicleId, WeaponId, AbilityId, UpgradeStats } from '../types';
-import { VEHICLES } from '../data/vehicles';
+import { Progress, VehicleId, WeaponId, AbilityId, SideModId, UpgradeStats } from '../types';
+import { VEHICLES, VEHICLE_LIST } from '../data/vehicles';
 import { WEAPONS, ABILITIES } from '../data/weapons';
+import { SIDE_MODS } from '../data/sideMods';
 
-const KEY = 'zs:progress:v1';
+const KEY = 'zs:progress:v2';
 
-const DEFAULT_UPGRADES: UpgradeStats = { speed: 0, armor: 0, handling: 0 };
+const ZERO: UpgradeStats = { speed: 0, armor: 0, handling: 0 };
+
+const allUpgrades: Record<VehicleId, UpgradeStats> = VEHICLE_LIST.reduce((acc, v) => {
+  acc[v.id] = { ...ZERO };
+  return acc;
+}, {} as Record<VehicleId, UpgradeStats>);
 
 export const DEFAULT_PROGRESS: Progress = {
   totalKills: 0,
@@ -13,26 +19,29 @@ export const DEFAULT_PROGRESS: Progress = {
   unlockedVehicles: ['hatchback'],
   unlockedWeapons: ['none'],
   unlockedAbilities: ['none'],
+  unlockedSideMods: ['none'],
   selectedVehicle: 'hatchback',
   selectedWeapon: 'none',
   selectedAbility: 'none',
-  upgrades: {
-    hatchback: { ...DEFAULT_UPGRADES },
-    pickup: { ...DEFAULT_UPGRADES },
-    muscle: { ...DEFAULT_UPGRADES },
-    tank: { ...DEFAULT_UPGRADES },
-    apc: { ...DEFAULT_UPGRADES },
-  },
+  selectedSideMod: 'none',
+  upgrades: allUpgrades,
 };
 
 export async function loadProgress(): Promise<Progress> {
   try {
     const raw = await AsyncStorage.getItem(KEY);
-    if (!raw) return { ...DEFAULT_PROGRESS };
+    if (!raw) return clone(DEFAULT_PROGRESS);
     const parsed = JSON.parse(raw) as Partial<Progress>;
-    return { ...DEFAULT_PROGRESS, ...parsed, upgrades: { ...DEFAULT_PROGRESS.upgrades, ...(parsed.upgrades ?? {}) } };
+    const merged: Progress = {
+      ...DEFAULT_PROGRESS,
+      ...parsed,
+      upgrades: { ...DEFAULT_PROGRESS.upgrades, ...(parsed.upgrades ?? {}) },
+    };
+    // Make sure stale saves don't end up selecting a vehicle that no longer exists.
+    if (!VEHICLES[merged.selectedVehicle]) merged.selectedVehicle = 'hatchback';
+    return merged;
   } catch {
-    return { ...DEFAULT_PROGRESS };
+    return clone(DEFAULT_PROGRESS);
   }
 }
 
@@ -53,12 +62,17 @@ export function applyKills(p: Progress, kills: number): Progress {
   for (const a of Object.values(ABILITIES)) {
     if (totalKills >= a.unlockKills) unlockedAbilities.add(a.id as AbilityId);
   }
+  const unlockedSideMods = new Set(p.unlockedSideMods);
+  for (const s of Object.values(SIDE_MODS)) {
+    if (totalKills >= s.unlockKills) unlockedSideMods.add(s.id as SideModId);
+  }
   return {
     ...p,
     totalKills,
     bestRunKills,
     unlockedWeapons: Array.from(unlockedWeapons),
     unlockedAbilities: Array.from(unlockedAbilities),
+    unlockedSideMods: Array.from(unlockedSideMods),
   };
 }
 
@@ -75,7 +89,7 @@ export function buyVehicle(p: Progress, id: VehicleId): Progress | null {
   };
 }
 
-export const UPGRADE_COSTS = [50, 150, 400, 900, 2000];
+export const UPGRADE_COSTS = [100, 400, 1200, 3500, 10000];
 export const MAX_UPGRADE = UPGRADE_COSTS.length;
 
 export function upgradeCost(level: number): number | null {
@@ -93,7 +107,11 @@ export function buyUpgrade(p: Progress, id: VehicleId, stat: keyof UpgradeStats)
     totalKills: p.totalKills - cost,
     upgrades: {
       ...p.upgrades,
-      [id]: { ...p.upgrades[id], [stat]: cur + 1 },
+      [id]: { ...(p.upgrades[id] ?? ZERO), [stat]: cur + 1 },
     },
   };
+}
+
+function clone<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj));
 }
