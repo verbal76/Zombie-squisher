@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - 'Github-build-pipeline-zombie-crusher'
-      - 'claude/fix-build-artifacts-visibility-rwXqU'
     tags:
       - 'v*'
   workflow_dispatch:
