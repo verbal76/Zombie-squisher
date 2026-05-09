@@ -45,7 +45,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.cardTitle}>{v.name}</Text>
                   <Text style={styles.cardMeta}>
-                    SPD {v.baseSpeed} · ARM {v.baseArmor} · HND {v.baseHandling}
+                    SPD {v.baseSpeed} · ARM {v.baseArmor} · HND {v.baseHandling} · ACC {v.baseAcceleration}
                   </Text>
                   {!owned && <Text style={styles.cost}>{v.killCost.toLocaleString()} kills</Text>}
                   {owned && selected && <Text style={styles.selectedTag}>SELECTED</Text>}
@@ -57,7 +57,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
         </Section>
 
         <Section title={`UPGRADE: ${VEHICLES[progress.selectedVehicle].name.toUpperCase()}`}>
-          {(['speed', 'armor', 'handling'] as (keyof UpgradeStats)[]).map((stat) => {
+          {(['speed', 'armor', 'handling', 'acceleration'] as (keyof UpgradeStats)[]).map((stat) => {
             const lvl = progress.upgrades[progress.selectedVehicle]?.[stat] ?? 0;
             const cost = upgradeCost(lvl);
             const maxed = cost === null;

@@ -23,6 +23,7 @@ export interface Vehicle {
   baseSpeed: number;
   baseArmor: number;
   baseHandling: number;
+  baseAcceleration: number;
   killCost: number;
   width: number;
   height: number;
@@ -59,6 +60,7 @@ export interface UpgradeStats {
   speed: number;
   armor: number;
   handling: number;
+  acceleration: number;
 }
 
 export interface Progress {
