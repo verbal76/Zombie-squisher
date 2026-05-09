@@ -9,6 +9,8 @@ export interface World {
   height: number;
   carX: number;
   carY: number;
+  heading: number;
+  forwardV: number;
   carVx: number;
   carVy: number;
   scroll: number;
@@ -28,7 +30,6 @@ export interface World {
   nextEntityId: number;
   shake: number;
   gameOver: boolean;
-  /** Next kill threshold at which a miniboss spawns. */
   nextBossKills: number;
 }
 
@@ -36,17 +37,22 @@ export interface DerivedStats {
   speed: number;
   armor: number;
   handling: number;
+  acceleration: number;
+  brakeStrength: number;
   bumperDamage: number;
 }
 
 export function deriveStats(p: Progress): { vehicle: Vehicle; stats: DerivedStats; weapon: Weapon } {
   const vehicle = VEHICLES[p.selectedVehicle];
   const weapon = WEAPONS[p.selectedWeapon];
-  const u = p.upgrades[vehicle.id] ?? { speed: 0, armor: 0, handling: 0 };
+  const u = p.upgrades[vehicle.id] ?? { speed: 0, armor: 0, handling: 0, acceleration: 0 };
+  const acceleration = vehicle.baseAcceleration + u.acceleration * 40;
   const stats: DerivedStats = {
     speed: vehicle.baseSpeed + u.speed * 25,
     armor: vehicle.baseArmor + u.armor * 35,
     handling: vehicle.baseHandling + u.handling * 30,
+    acceleration,
+    brakeStrength: acceleration * 2.2,
     bumperDamage: 50 + u.armor * 10,
   };
   return { vehicle, stats, weapon };
@@ -58,11 +64,13 @@ export function createWorld(width: number, height: number, p: Progress): World {
     width,
     height,
     carX: width / 2,
-    carY: height - 140,
+    carY: height / 2,
+    heading: 0,
+    forwardV: 0,
     carVx: 0,
     carVy: 0,
     scroll: 0,
-    speed: stats.speed,
+    speed: 0,
     zombies: [],
     projectiles: [],
     bloodSpots: [],
@@ -83,8 +91,7 @@ export function createWorld(width: number, height: number, p: Progress): World {
 }
 
 export interface UpdateInput {
-  steer: number;
-  steerY: number;
+  wheel: number;
   throttle: boolean;
   brake: boolean;
   fire: boolean;
@@ -109,13 +116,9 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     world.abilityCooldown = a.cooldownMs;
     if (p.selectedAbility === 'emp') {
       for (const z of world.zombies) {
-        if (z.kind === 'boss') {
-          z.hp -= 200;
-        } else if (z.maxHp <= 60) {
-          z.hp = 0;
-        } else {
-          z.vy *= 0.2;
-        }
+        if (z.kind === 'boss') z.hp -= 200;
+        else if (z.maxHp <= 60) z.hp = 0;
+        else z.vy *= 0.2;
       }
       world.shake = 14;
     }
@@ -126,58 +129,45 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const nitroMul = isNitro ? 1.8 : 1;
   const isShielded = world.invuln > 0 && p.selectedAbility === 'shield' && world.abilityActive > 0;
 
-  // Movement model: thumbstick is a 2D direction vector. The car only moves
-  // when the player is holding GAS. BRAKE hard-zeroes velocity (no drift).
-  // No auto-movement — release everything and the car coasts to a stop.
+  const maxSpeed = stats.speed * nitroMul;
   if (input.brake) {
-    world.carVx = 0;
-    world.carVy = 0;
+    world.forwardV = Math.max(0, world.forwardV - stats.brakeStrength * dt);
+  } else if (input.throttle) {
+    world.forwardV = Math.min(maxSpeed, world.forwardV + stats.acceleration * nitroMul * dt);
   } else {
-    const driving = input.throttle;
-    const targetVx = driving ? input.steer * stats.speed * nitroMul : 0;
-    const targetVy = driving ? input.steerY * stats.speed * nitroMul : 0;
-    const tween = driving ? 18 : 6;
-    world.carVx += (targetVx - world.carVx) * Math.min(1, dt * tween);
-    world.carVy += (targetVy - world.carVy) * Math.min(1, dt * tween);
-  }
-  world.carX += world.carVx * dt;
-  world.carY += world.carVy * dt;
-  const halfW = vehicle.width / 2;
-  const halfH = vehicle.height / 2;
-  if (world.carX < halfW + 10) {
-    world.carX = halfW + 10;
-    world.carVx = 0;
-  }
-  if (world.carX > world.width - halfW - 10) {
-    world.carX = world.width - halfW - 10;
-    world.carVx = 0;
-  }
-  if (world.carY < halfH + 60) {
-    world.carY = halfH + 60;
-    world.carVy = 0;
-  }
-  if (world.carY > world.height - halfH - 20) {
-    world.carY = world.height - halfH - 20;
-    world.carVy = 0;
+    world.forwardV *= Math.pow(0.5, dt / 1.5);
+    if (world.forwardV < 1) world.forwardV = 0;
   }
 
-  world.speed = Math.hypot(world.carVx, world.carVy);
-  world.scroll -= world.carVy * dt;
+  const speedFactor = Math.min(1, world.forwardV / Math.max(1, stats.speed * 0.4));
+  const turnRate = input.wheel * stats.handling * 0.012 * speedFactor;
+  world.heading += turnRate * dt * 60;
+
+  const vx = Math.sin(world.heading) * world.forwardV;
+  const vy = -Math.cos(world.heading) * world.forwardV;
+  world.carVx = vx;
+  world.carVy = vy;
+  world.carX += vx * dt;
+  world.carY += vy * dt;
+
+  const halfW = vehicle.width / 2;
+  const halfH = vehicle.height / 2;
+  if (world.carX < halfW + 10) { world.carX = halfW + 10; world.forwardV *= 0.3; }
+  if (world.carX > world.width - halfW - 10) { world.carX = world.width - halfW - 10; world.forwardV *= 0.3; }
+  if (world.carY < halfH + 10) { world.carY = halfH + 10; world.forwardV *= 0.3; }
+  if (world.carY > world.height - halfH - 10) { world.carY = world.height - halfH - 10; world.forwardV *= 0.3; }
+
+  world.speed = world.forwardV;
   const bumperBonus = isNitro ? 2 : 1;
 
   world.spawnTimer -= dt;
   const spawnEvery = Math.max(0.08, 1.2 - world.wave * 0.05);
-  while (world.spawnTimer <= 0) {
-    spawnZombie(world, false);
-    world.spawnTimer += spawnEvery;
-  }
-
+  while (world.spawnTimer <= 0) { spawnZombie(world, false); world.spawnTimer += spawnEvery; }
   if (world.wave >= 8 && world.kills >= world.nextBossKills) {
     spawnZombie(world, true);
     world.nextBossKills += 200 + world.wave * 30;
   }
 
-  // Move zombies — they chase the car in 2D (no more world auto-scroll).
   for (const z of world.zombies) {
     z.y += z.vy * dt;
     z.x += z.vx * dt;
@@ -188,27 +178,15 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     z.y += Math.sign(dy) * Math.min(Math.abs(dy), chasePull * dt);
   }
 
-  // Fire weapon — only while the player is holding the fire button.
   if (weapon.id !== 'none' && input.fire) {
     world.fireTimer -= dt * 1000;
-    while (world.fireTimer <= 0) {
-      fireWeapon(world, weapon, vehicle);
-      world.fireTimer += weapon.fireRateMs;
-    }
+    while (world.fireTimer <= 0) { fireWeapon(world, weapon, vehicle); world.fireTimer += weapon.fireRateMs; }
   } else if (world.fireTimer < 0) {
     world.fireTimer = 0;
   }
 
-  for (const pr of world.projectiles) {
-    pr.x += pr.vx * dt;
-    pr.y += pr.vy * dt;
-    pr.life -= dt;
-  }
-
-  // Blood stays on the ground (no auto-scroll); just fade.
-  for (const b of world.bloodSpots) {
-    b.alpha -= dt * 0.15;
-  }
+  for (const pr of world.projectiles) { pr.x += pr.vx * dt; pr.y += pr.vy * dt; pr.life -= dt; }
+  for (const b of world.bloodSpots) { b.alpha -= dt * 0.15; }
 
   const carBox = {
     x1: world.carX - vehicle.width / 2,
@@ -216,53 +194,21 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     y1: world.carY - vehicle.height / 2,
     y2: world.carY + vehicle.height / 2,
   };
-  const sideBoxL = sideMod.reach > 0 && {
-    x1: carBox.x1 - sideMod.reach,
-    x2: carBox.x1,
-    y1: carBox.y1 + 10,
-    y2: carBox.y2 - 10,
-  };
-  const sideBoxR = sideMod.reach > 0 && {
-    x1: carBox.x2,
-    x2: carBox.x2 + sideMod.reach,
-    y1: carBox.y1 + 10,
-    y2: carBox.y2 - 10,
-  };
+  const sideBoxL = sideMod.reach > 0 && { x1: carBox.x1 - sideMod.reach, x2: carBox.x1, y1: carBox.y1 + 10, y2: carBox.y2 - 10 };
+  const sideBoxR = sideMod.reach > 0 && { x1: carBox.x2, x2: carBox.x2 + sideMod.reach, y1: carBox.y1 + 10, y2: carBox.y2 - 10 };
 
   for (const z of world.zombies) {
     if (z.hp <= 0) continue;
     const def = ZOMBIE_DEFS[z.kind];
-
     if (z.x + z.size > carBox.x1 && z.x - z.size < carBox.x2 && z.y + z.size > carBox.y1 && z.y - z.size < carBox.y2) {
       const dmg = stats.bumperDamage * bumperBonus;
       z.hp -= dmg;
-      if (z.hp <= 0) {
-        world.kills += 1;
-        spawnBlood(world, z);
-        world.shake = Math.min(20, world.shake + 2);
-      }
-      if (!isShielded && world.invuln <= 0) {
-        world.hp -= def.contactDamage;
-        world.invuln = 180;
-      }
+      if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); world.shake = Math.min(20, world.shake + 2); }
+      if (!isShielded && world.invuln <= 0) { world.hp -= def.contactDamage; world.invuln = 180; }
       continue;
     }
-
-    if (sideBoxL && hits(z, sideBoxL)) {
-      z.hp -= sideMod.damage;
-      if (z.hp <= 0) {
-        world.kills += 1;
-        spawnBlood(world, z);
-      }
-      continue;
-    }
-    if (sideBoxR && hits(z, sideBoxR)) {
-      z.hp -= sideMod.damage;
-      if (z.hp <= 0) {
-        world.kills += 1;
-        spawnBlood(world, z);
-      }
-    }
+    if (sideBoxL && hits(z, sideBoxL)) { z.hp -= sideMod.damage; if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); } continue; }
+    if (sideBoxR && hits(z, sideBoxR)) { z.hp -= sideMod.damage; if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); } }
   }
 
   for (const pr of world.projectiles) {
@@ -274,23 +220,17 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
       if (dx * dx + dy * dy < (z.size + 4) * (z.size + 4)) {
         z.hp -= pr.damage;
         if (pr.kind !== 'laser') pr.life = -1;
-        if (z.hp <= 0) {
-          world.kills += 1;
-          spawnBlood(world, z);
-        }
+        if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); }
         if (pr.kind !== 'laser') break;
       }
     }
   }
 
-  world.zombies = world.zombies.filter((z) => z.hp > 0 && z.y < world.height + 50 && z.x > -120 && z.x < world.width + 120);
+  world.zombies = world.zombies.filter((z) => z.hp > 0 && z.y > -200 && z.y < world.height + 200 && z.x > -200 && z.x < world.width + 200);
   world.projectiles = world.projectiles.filter((p) => p.life > 0 && p.y > -40 && p.y < world.height + 40 && p.x > -40 && p.x < world.width + 40);
-  world.bloodSpots = world.bloodSpots.filter((b) => b.alpha > 0 && b.y < world.height + 40);
+  world.bloodSpots = world.bloodSpots.filter((b) => b.alpha > 0);
 
-  if (world.hp <= 0) {
-    world.hp = 0;
-    world.gameOver = true;
-  }
+  if (world.hp <= 0) { world.hp = 0; world.gameOver = true; }
 }
 
 function hits(z: Zombie, box: { x1: number; x2: number; y1: number; y2: number }): boolean {
@@ -313,75 +253,54 @@ function spawnBlood(world: World, z: Zombie): void {
 function spawnZombie(world: World, forceBoss: boolean): void {
   const kind = forceBoss ? 'boss' : pickZombieKind(world.wave);
   const def = ZOMBIE_DEFS[kind];
-  const sideChance = Math.min(0.45, 0.1 + world.wave * 0.025);
-  const r = Math.random();
+  const side = Math.floor(Math.random() * 4);
   let x: number;
   let y: number;
-  let vx = 0;
-  let vy = def.speed;
-  if (forceBoss || r > sideChance * 2) {
-    x = 30 + Math.random() * (world.width - 60);
-    y = -20 - Math.random() * 40;
-    vx = (Math.random() - 0.5) * 30;
-  } else if (r > sideChance) {
-    x = -20;
-    y = 60 + Math.random() * (world.height * 0.55);
-    vx = def.speed * 0.6;
-    vy = def.speed * 0.4;
-  } else {
-    x = world.width + 20;
-    y = 60 + Math.random() * (world.height * 0.55);
-    vx = -def.speed * 0.6;
-    vy = def.speed * 0.4;
-  }
+  if (side === 0) { x = Math.random() * world.width; y = -20; }
+  else if (side === 1) { x = world.width + 20; y = Math.random() * world.height; }
+  else if (side === 2) { x = Math.random() * world.width; y = world.height + 20; }
+  else { x = -20; y = Math.random() * world.height; }
+  const dx = world.carX - x;
+  const dy = world.carY - y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const vx = (dx / dist) * def.speed * 0.5;
+  const vy = (dy / dist) * def.speed * 0.5;
   const hp = def.hp + world.wave * (kind === 'boss' ? 40 : 4);
-  const z: Zombie = {
-    id: world.nextEntityId++,
-    x,
-    y,
-    vx,
-    vy,
-    hp,
-    maxHp: hp,
-    kind,
-    size: def.size,
-  };
+  const z: Zombie = { id: world.nextEntityId++, x, y, vx, vy, hp, maxHp: hp, kind, size: def.size };
   world.zombies.push(z);
 }
 
 function fireWeapon(world: World, weapon: Weapon, vehicle: Vehicle): void {
-  const ox = world.carX;
-  const oy = world.carY - vehicle.height / 2;
+  const fwdX = Math.sin(world.heading);
+  const fwdY = -Math.cos(world.heading);
+  const muzzleDist = vehicle.height / 2 + 4;
+  const ox = world.carX + fwdX * muzzleDist;
+  const oy = world.carY + fwdY * muzzleDist;
   switch (weapon.id) {
     case 'mg':
-      world.projectiles.push(makeProj(world, 'mg', ox, oy, 0, -700, weapon.damage, 1.2));
+      world.projectiles.push(makeProj(world, 'mg', ox, oy, fwdX * 700, fwdY * 700, weapon.damage, 1.2));
       break;
     case 'flame':
       for (let i = -1; i <= 1; i++) {
-        world.projectiles.push(makeProj(world, 'flame', ox, oy, i * 80, -380, weapon.damage, 0.45));
+        const angle = world.heading + i * 0.25;
+        const sx = Math.sin(angle), sy = -Math.cos(angle);
+        world.projectiles.push(makeProj(world, 'flame', ox, oy, sx * 380, sy * 380, weapon.damage, 0.45));
       }
       break;
-    case 'rockets':
-      world.projectiles.push(makeProj(world, 'rocket', ox - 12, oy, -20, -520, weapon.damage, 1.5));
-      world.projectiles.push(makeProj(world, 'rocket', ox + 12, oy, 20, -520, weapon.damage, 1.5));
+    case 'rockets': {
+      const sideX = Math.cos(world.heading);
+      const sideY = Math.sin(world.heading);
+      world.projectiles.push(makeProj(world, 'rocket', ox - sideX * 12, oy - sideY * 12, fwdX * 520, fwdY * 520, weapon.damage, 1.5));
+      world.projectiles.push(makeProj(world, 'rocket', ox + sideX * 12, oy + sideY * 12, fwdX * 520, fwdY * 520, weapon.damage, 1.5));
       world.shake = Math.min(20, world.shake + 5);
       break;
+    }
     case 'laser':
-      world.projectiles.push(makeProj(world, 'laser', ox, oy, 0, -1400, weapon.damage, 0.4));
+      world.projectiles.push(makeProj(world, 'laser', ox, oy, fwdX * 1400, fwdY * 1400, weapon.damage, 0.4));
       break;
   }
 }
 
 function makeProj(world: World, kind: ProjectileKind, x: number, y: number, vx: number, vy: number, damage: number, life: number): Projectile {
-  return {
-    id: world.nextEntityId++,
-    x,
-    y,
-    vx,
-    vy,
-    hp: 1,
-    damage,
-    life,
-    kind,
-  };
+  return { id: world.nextEntityId++, x, y, vx, vy, hp: 1, damage, life, kind };
 }
