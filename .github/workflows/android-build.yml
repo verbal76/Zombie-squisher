@@ -80,6 +80,7 @@ jobs:
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: zombie-squisher-${{ steps.profile.outputs.profile }}-${{ github.run_number }}
           path: build/zombie-squisher.${{ steps.profile.outputs.outext }}
