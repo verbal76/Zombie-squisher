@@ -45,7 +45,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.cardTitle}>{v.name}</Text>
                   <Text style={styles.cardMeta}>
-                    SPD {v.baseSpeed} · ARM {v.baseArmor} · HND {v.baseHandling}
+                    SPD {v.baseSpeed} · ARM {v.baseArmor} · HND {v.baseHandling} · ACC {v.baseAcceleration}
                   </Text>
                   {!owned && <Text style={styles.cost}>{v.killCost.toLocaleString()} kills</Text>}
                   {owned && selected && <Text style={styles.selectedTag}>SELECTED</Text>}
@@ -57,7 +57,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
         </Section>
 
         <Section title={`UPGRADE: ${VEHICLES[progress.selectedVehicle].name.toUpperCase()}`}>
-          {(['speed', 'armor', 'handling'] as (keyof UpgradeStats)[]).map((stat) => {
+          {(['speed', 'armor', 'handling', 'acceleration'] as (keyof UpgradeStats)[]).map((stat) => {
             const lvl = progress.upgrades[progress.selectedVehicle]?.[stat] ?? 0;
             const cost = upgradeCost(lvl);
             const maxed = cost === null;
@@ -189,33 +189,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0a' },
-  topBar: {
-    paddingTop: 50,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
-  },
+  topBar: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#1a1a1a' },
   backBtn: { paddingVertical: 6, paddingHorizontal: 10 },
   backText: { color: '#ffd24a', fontWeight: '800' },
   kills: { color: '#fff', fontWeight: '900', fontSize: 18 },
   scroll: { padding: 16, paddingBottom: 64 },
   section: { marginBottom: 24 },
   sectionTitle: { color: '#888', letterSpacing: 2, marginBottom: 8, fontWeight: '700' },
-  card: {
-    flexDirection: 'row',
-    backgroundColor: '#1a1a1a',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 8,
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
+  card: { flexDirection: 'row', backgroundColor: '#1a1a1a', padding: 12, borderRadius: 10, marginBottom: 8, alignItems: 'center', gap: 12, borderWidth: 2, borderColor: 'transparent' },
   cardSelected: { borderColor: '#ffd24a' },
   cardLocked: { opacity: 0.5 },
   swatch: { width: 36, height: 36, borderRadius: 6, borderWidth: 2, borderColor: '#000' },
@@ -224,15 +205,7 @@ const styles = StyleSheet.create({
   cost: { color: '#e34a4a', fontSize: 12, marginTop: 4, fontWeight: '700' },
   selectedTag: { color: '#ffd24a', fontSize: 11, marginTop: 4, fontWeight: '800', letterSpacing: 1 },
   tapTag: { color: '#666', fontSize: 11, marginTop: 4 },
-  upgRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1a1a1a',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 6,
-    gap: 12,
-  },
+  upgRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', padding: 12, borderRadius: 10, marginBottom: 6, gap: 12 },
   upgLabel: { color: '#fff', fontWeight: '800', width: 80 },
   pips: { flexDirection: 'row', flex: 1, gap: 4 },
   pip: { flex: 1, height: 10, backgroundColor: '#2a2a2a', borderRadius: 3 },

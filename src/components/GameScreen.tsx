@@ -1,51 +1,44 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Dimensions,
-  GestureResponderEvent,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { Progress } from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Canvas, useFrame } from '@react-three/fiber/native';
+import * as THREE from 'three';
+import { Progress, Vehicle, Zombie, Projectile } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
-import { SIDE_MODS } from '../data/sideMods';
 import { ZOMBIE_DEFS } from '../data/zombies';
 import { World, createWorld, step } from '../game/engine';
+import { SteeringWheel } from './SteeringWheel';
 
 interface Props {
   progress: Progress;
   onEnd: (kills: number) => void;
 }
 
-const { width: WIN_W, height: WIN_H } = Dimensions.get('window');
+const ARENA_W = 1200;
+const ARENA_H = 1200;
+const CAR_DEPTH = 18;
+const ZOMBIE_DEPTH = 16;
+const BOSS_DEPTH = 28;
 
-const STICK_BASE = 130;
-const STICK_KNOB = 58;
-const STICK_RADIUS = (STICK_BASE - STICK_KNOB) / 2;
-const STICK_MARGIN = 24;
-
+const WHEEL_SIZE = 150;
 const BTN_SIZE = 78;
 const BTN_GAP = 12;
+const MARGIN = 24;
 
 export function GameScreen({ progress, onEnd }: Props) {
-  const playW = WIN_W;
-  const playH = WIN_H - 120;
-  const worldRef = useRef<World>(createWorld(playW, playH, progress));
-  const steerRef = useRef(0);
-  const steerYRef = useRef(0);
+  useWindowDimensions();
+
+  const worldRef = useRef<World>(createWorld(ARENA_W, ARENA_H, progress));
+  const wheelRef = useRef(0);
   const throttleRef = useRef(false);
   const brakeRef = useRef(false);
   const fireRef = useRef(false);
   const abilityTriggerRef = useRef(false);
   const [, setTick] = useState(0);
   const [exited, setExited] = useState(false);
-  const [knob, setKnob] = useState({ x: 0, y: 0 });
 
   const vehicle = VEHICLES[progress.selectedVehicle];
   const ability = ABILITIES[progress.selectedAbility];
-  const sideMod = SIDE_MODS[progress.selectedSideMod];
 
   useEffect(() => {
     let raf = 0;
@@ -54,19 +47,13 @@ export function GameScreen({ progress, onEnd }: Props) {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const w = worldRef.current;
-      step(
-        w,
-        dt,
-        {
-          steer: steerRef.current,
-          steerY: steerYRef.current,
-          throttle: throttleRef.current,
-          brake: brakeRef.current,
-          fire: fireRef.current,
-          triggerAbility: abilityTriggerRef.current,
-        },
-        progress,
-      );
+      step(w, dt, {
+        wheel: wheelRef.current,
+        throttle: throttleRef.current,
+        brake: brakeRef.current,
+        fire: fireRef.current,
+        triggerAbility: abilityTriggerRef.current,
+      }, progress);
       abilityTriggerRef.current = false;
       setTick((t) => (t + 1) % 1000000);
       if (w.gameOver && !exited) {
@@ -80,213 +67,55 @@ export function GameScreen({ progress, onEnd }: Props) {
     return () => cancelAnimationFrame(raf);
   }, [progress, exited, onEnd]);
 
-  const handleStick = (e: GestureResponderEvent) => {
-    const cx = STICK_BASE / 2;
-    const cy = STICK_BASE / 2;
-    const dx = e.nativeEvent.locationX - cx;
-    const dy = e.nativeEvent.locationY - cy;
-    const dist = Math.hypot(dx, dy);
-    const max = STICK_RADIUS;
-    let kx = dx;
-    let ky = dy;
-    if (dist > max) {
-      kx = (dx / dist) * max;
-      ky = (dy / dist) * max;
-    }
-    setKnob({ x: kx, y: ky });
-    steerRef.current = Math.max(-1, Math.min(1, kx / max));
-    steerYRef.current = Math.max(-1, Math.min(1, ky / max));
-  };
-  const releaseStick = () => {
-    setKnob({ x: 0, y: 0 });
-    steerRef.current = 0;
-    steerYRef.current = 0;
-  };
-
   const w = worldRef.current;
-
   const hpPct = Math.max(0, w.hp / Math.max(1, w.maxHp));
   const cdPct = ability.cooldownMs > 0 ? 1 - w.abilityCooldown / ability.cooldownMs : 1;
 
-  const lanePixels = useMemo(() => {
-    const stripeH = 40;
-    const stripes: { y: number }[] = [];
-    const offset = w.scroll % stripeH;
-    for (let y = -stripeH; y < playH + stripeH; y += stripeH) {
-      stripes.push({ y: y + offset });
-    }
-    return stripes;
-  }, [w.scroll, playH]);
-
-  const shakeX = w.shake ? (Math.random() - 0.5) * w.shake : 0;
-  const shakeY = w.shake ? (Math.random() - 0.5) * w.shake : 0;
-
   return (
     <View style={styles.root}>
-      <View
-        style={[styles.play, { width: playW, height: playH, transform: [{ translateX: shakeX }, { translateY: shakeY }] }]}
+      <Canvas
+        style={StyleSheet.absoluteFill}
+        gl={{ antialias: true }}
+        camera={{ position: [w.carX, 80, w.carY + 120], fov: 55, near: 1, far: 3000 }}
       >
-        <View style={[styles.shoulder, { left: 0 }]} />
-        <View style={[styles.shoulder, { right: 0 }]} />
-        {lanePixels.map((s, i) => (
-          <View key={i} style={[styles.laneStripe, { top: s.y, left: playW / 2 - 3 }]} />
+        <color attach="background" args={['#1a1a1a']} />
+        <ambientLight intensity={0.55} />
+        <directionalLight position={[400, 600, 200]} intensity={0.9} />
+
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[ARENA_W / 2, 0, ARENA_H / 2]}>
+          <planeGeometry args={[ARENA_W, ARENA_H]} />
+          <meshStandardMaterial color={'#3a4a2e'} />
+        </mesh>
+
+        <mesh position={[ARENA_W / 2, 8, 0]}>
+          <boxGeometry args={[ARENA_W, 16, 6]} />
+          <meshStandardMaterial color={'#2a1f15'} />
+        </mesh>
+        <mesh position={[ARENA_W / 2, 8, ARENA_H]}>
+          <boxGeometry args={[ARENA_W, 16, 6]} />
+          <meshStandardMaterial color={'#2a1f15'} />
+        </mesh>
+        <mesh position={[0, 8, ARENA_H / 2]}>
+          <boxGeometry args={[6, 16, ARENA_H]} />
+          <meshStandardMaterial color={'#2a1f15'} />
+        </mesh>
+        <mesh position={[ARENA_W, 8, ARENA_H / 2]}>
+          <boxGeometry args={[6, 16, ARENA_H]} />
+          <meshStandardMaterial color={'#2a1f15'} />
+        </mesh>
+
+        <ChaseCamera worldRef={worldRef} />
+        <CarMesh worldRef={worldRef} vehicle={vehicle} />
+
+        {w.zombies.map((z) => (
+          <ZombieMesh key={z.id} z={z} />
         ))}
-
-        {w.bloodSpots.map((b) => (
-          <View
-            key={b.id}
-            style={{
-              position: 'absolute',
-              left: b.x - b.size / 2,
-              top: b.y - b.size / 2,
-              width: b.size,
-              height: b.size,
-              borderRadius: b.size / 2,
-              backgroundColor: '#5a0a14',
-              opacity: Math.max(0, Math.min(0.85, b.alpha)),
-            }}
-          />
+        {w.projectiles.map((pr) => (
+          <ProjectileMesh key={pr.id} pr={pr} />
         ))}
+      </Canvas>
 
-        {w.zombies.map((z) => {
-          const def = ZOMBIE_DEFS[z.kind];
-          const isBoss = z.kind === 'boss';
-          const side = z.size * 2;
-          const depth = isBoss ? 14 : 8;
-          const dark = shade(def.color, -0.45);
-          return (
-            <React.Fragment key={z.id}>
-              <View
-                style={{
-                  position: 'absolute',
-                  left: z.x - z.size + depth * 0.4,
-                  top: z.y - z.size + depth,
-                  width: side,
-                  height: side,
-                  backgroundColor: dark,
-                  borderWidth: isBoss ? 3 : 2,
-                  borderColor: def.ringColor ?? '#0a0a0a',
-                  borderRadius: 3,
-                }}
-              />
-              <View
-                style={{
-                  position: 'absolute',
-                  left: z.x - z.size,
-                  top: z.y - z.size,
-                  width: side,
-                  height: side,
-                  borderRadius: 3,
-                  backgroundColor: def.color,
-                  borderWidth: isBoss ? 3 : 2,
-                  borderColor: def.ringColor ?? '#1a1a1a',
-                }}
-              >
-                {isBoss && (
-                  <View
-                    style={{
-                      position: 'absolute',
-                      left: -4,
-                      right: -4,
-                      bottom: -10,
-                      height: 4,
-                      backgroundColor: '#2a0e0e',
-                      borderRadius: 2,
-                    }}
-                  >
-                    <View
-                      style={{
-                        width: `${Math.max(0, (z.hp / z.maxHp) * 100)}%`,
-                        height: '100%',
-                        backgroundColor: '#ff5555',
-                      }}
-                    />
-                  </View>
-                )}
-              </View>
-            </React.Fragment>
-          );
-        })}
-
-        {w.projectiles.map((pr) => {
-          const style = projectileStyle(pr.kind);
-          return (
-            <View
-              key={pr.id}
-              style={{
-                position: 'absolute',
-                left: pr.x - style.w / 2,
-                top: pr.y - style.h / 2,
-                width: style.w,
-                height: style.h,
-                backgroundColor: style.color,
-                borderRadius: style.r,
-                opacity: style.opacity,
-              }}
-            />
-          );
-        })}
-
-        <View
-          style={{
-            position: 'absolute',
-            left: w.carX - vehicle.width / 2 + 5,
-            top: w.carY - vehicle.height / 2 + 12,
-            width: vehicle.width,
-            height: vehicle.height,
-            backgroundColor: shade(vehicle.color, -0.5),
-            borderRadius: 8,
-            borderWidth: 2,
-            borderColor: '#000',
-          }}
-        />
-        <View
-          style={{
-            position: 'absolute',
-            left: w.carX - vehicle.width / 2,
-            top: w.carY - vehicle.height / 2,
-            width: vehicle.width,
-            height: vehicle.height,
-            backgroundColor: vehicle.color,
-            borderRadius: 8,
-            borderWidth: 2,
-            borderColor: w.invuln > 0 ? '#4ad1ff' : '#000',
-          }}
-        >
-          <View style={styles.windshield} />
-          <View style={styles.bumper} />
-        </View>
-        {sideMod.reach > 0 && (
-          <>
-            <View
-              style={{
-                position: 'absolute',
-                left: w.carX - vehicle.width / 2 - sideMod.reach,
-                top: w.carY - vehicle.height / 2 + 10,
-                width: sideMod.reach,
-                height: vehicle.height - 20,
-                backgroundColor: '#bfbfbf',
-                borderWidth: 1,
-                borderColor: '#222',
-              }}
-            />
-            <View
-              style={{
-                position: 'absolute',
-                left: w.carX + vehicle.width / 2,
-                top: w.carY - vehicle.height / 2 + 10,
-                width: sideMod.reach,
-                height: vehicle.height - 20,
-                backgroundColor: '#bfbfbf',
-                borderWidth: 1,
-                borderColor: '#222',
-              }}
-            />
-          </>
-        )}
-      </View>
-
-      <View style={styles.hud}>
+      <View style={[styles.hud, { top: 12, left: 12, right: 12 }]} pointerEvents="none">
         <View style={styles.hudRow}>
           <Text style={styles.hudKills}>KILLS {w.kills}</Text>
           <Text style={styles.hudWave}>WAVE {w.wave + 1}</Text>
@@ -296,33 +125,12 @@ export function GameScreen({ progress, onEnd }: Props) {
         </View>
       </View>
 
-      <View style={[styles.stickBase, { left: STICK_MARGIN, bottom: STICK_MARGIN }]}>
-        <View
-          style={StyleSheet.absoluteFill}
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
-          onResponderGrant={handleStick}
-          onResponderMove={handleStick}
-          onResponderRelease={releaseStick}
-          onResponderTerminate={releaseStick}
-        />
-        <View
-          pointerEvents="none"
-          style={[
-            styles.stickKnob,
-            {
-              left: STICK_BASE / 2 - STICK_KNOB / 2 + knob.x,
-              top: STICK_BASE / 2 - STICK_KNOB / 2 + knob.y,
-            },
-          ]}
-        />
+      <View style={[styles.wheelWrap, { left: MARGIN, bottom: MARGIN }]}>
+        <SteeringWheel size={WHEEL_SIZE} onChange={(t) => (wheelRef.current = t)} />
       </View>
 
       <View
-        style={[
-          styles.cluster,
-          { right: STICK_MARGIN, bottom: STICK_MARGIN, width: BTN_SIZE * 2 + BTN_GAP, height: BTN_SIZE * 2 + BTN_GAP },
-        ]}
+        style={[styles.cluster, { right: MARGIN, bottom: MARGIN, width: BTN_SIZE * 2 + BTN_GAP, height: BTN_SIZE * 2 + BTN_GAP }]}
         pointerEvents="box-none"
       >
         <Pressable
@@ -350,9 +158,7 @@ export function GameScreen({ progress, onEnd }: Props) {
 
       {progress.selectedAbility !== 'none' && (
         <Pressable
-          onPress={() => {
-            abilityTriggerRef.current = true;
-          }}
+          onPress={() => { abilityTriggerRef.current = true; }}
           style={[styles.abilityBtn, w.abilityCooldown > 0 && styles.abilityBtnDisabled]}
         >
           <Text style={styles.abilityText}>{ability.name}</Text>
@@ -365,147 +171,97 @@ export function GameScreen({ progress, onEnd }: Props) {
   );
 }
 
-function shade(hex: string, amount: number): string {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.replace('#', ''));
-  if (!m) return hex;
-  const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
-  const r = clamp(parseInt(m[1], 16) * (1 + amount));
-  const g = clamp(parseInt(m[2], 16) * (1 + amount));
-  const b = clamp(parseInt(m[3], 16) * (1 + amount));
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+function ChaseCamera({ worldRef }: { worldRef: React.MutableRefObject<World> }) {
+  useFrame(({ camera }) => {
+    const w = worldRef.current;
+    const dist = 130;
+    const height = 90;
+    const tx = w.carX - Math.sin(w.heading) * dist;
+    const tz = w.carY + Math.cos(w.heading) * dist;
+    camera.position.x += (tx - camera.position.x) * 0.15;
+    camera.position.y += (height - camera.position.y) * 0.15;
+    camera.position.z += (tz - camera.position.z) * 0.15;
+    camera.lookAt(w.carX, 0, w.carY);
+  });
+  return null;
 }
 
-function projectileStyle(kind: string) {
+function CarMesh({ worldRef, vehicle }: { worldRef: React.MutableRefObject<World>; vehicle: Vehicle }) {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(() => {
+    const w = worldRef.current;
+    if (!ref.current) return;
+    ref.current.position.set(w.carX, CAR_DEPTH / 2, w.carY);
+    ref.current.rotation.y = -w.heading;
+  });
+  return (
+    <group ref={ref}>
+      <mesh position={[0, 0, 0]}>
+        <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
+        <meshStandardMaterial color={vehicle.color} />
+      </mesh>
+      <mesh position={[0, CAR_DEPTH * 0.5 + 3, -vehicle.height * 0.15]}>
+        <boxGeometry args={[vehicle.width * 0.7, 6, vehicle.height * 0.4]} />
+        <meshStandardMaterial color={'#1a2a3a'} />
+      </mesh>
+      <mesh position={[0, 0, -vehicle.height / 2 - 2]}>
+        <boxGeometry args={[vehicle.width * 0.95, CAR_DEPTH * 0.6, 4]} />
+        <meshStandardMaterial color={'#999'} />
+      </mesh>
+    </group>
+  );
+}
+
+function ZombieMesh({ z }: { z: Zombie }) {
+  const def = ZOMBIE_DEFS[z.kind];
+  const isBoss = z.kind === 'boss';
+  const depth = isBoss ? BOSS_DEPTH : ZOMBIE_DEPTH;
+  const side = z.size * 2;
+  return (
+    <mesh position={[z.x, depth / 2, z.y]}>
+      <boxGeometry args={[side, depth, side]} />
+      <meshStandardMaterial color={def.color} />
+    </mesh>
+  );
+}
+
+function ProjectileMesh({ pr }: { pr: Projectile }) {
+  const style = projectileBoxStyle(pr.kind);
+  return (
+    <mesh position={[pr.x, 12, pr.y]}>
+      <boxGeometry args={[style.size, style.size, style.size]} />
+      <meshStandardMaterial color={style.color} emissive={style.color} emissiveIntensity={0.5} />
+    </mesh>
+  );
+}
+
+function projectileBoxStyle(kind: string) {
   switch (kind) {
-    case 'flame':
-      return { w: 14, h: 18, color: '#ff7a1a', r: 7, opacity: 0.85 };
-    case 'rocket':
-      return { w: 6, h: 16, color: '#ff3a3a', r: 3, opacity: 1 };
-    case 'laser':
-      return { w: 4, h: 36, color: '#9cf2ff', r: 2, opacity: 0.9 };
-    default:
-      return { w: 4, h: 12, color: '#ffd24a', r: 2, opacity: 1 };
+    case 'flame': return { size: 12, color: '#ff7a1a' };
+    case 'rocket': return { size: 8, color: '#ff3a3a' };
+    case 'laser': return { size: 6, color: '#9cf2ff' };
+    default: return { size: 5, color: '#ffd24a' };
   }
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0a' },
-  play: { backgroundColor: '#1a1a1a', overflow: 'hidden' },
-  shoulder: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 6,
-    backgroundColor: '#3a3a2a',
-  },
-  laneStripe: {
-    position: 'absolute',
-    width: 6,
-    height: 24,
-    backgroundColor: '#d8c060',
-    borderRadius: 2,
-  },
-  windshield: {
-    position: 'absolute',
-    top: 12,
-    left: 6,
-    right: 6,
-    height: 18,
-    backgroundColor: '#3aa0c8',
-    borderRadius: 3,
-    opacity: 0.7,
-  },
-  bumper: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 6,
-    backgroundColor: '#999',
-  },
-  hud: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
-  },
+  hud: { position: 'absolute' },
   hudRow: { flexDirection: 'row', justifyContent: 'space-between' },
   hudKills: { color: '#fff', fontWeight: '900', fontSize: 18, letterSpacing: 1 },
   hudWave: { color: '#ffd24a', fontWeight: '900', fontSize: 16 },
-  hpBar: {
-    marginTop: 6,
-    height: 10,
-    backgroundColor: '#2a0e0e',
-    borderRadius: 5,
-    overflow: 'hidden',
-  },
+  hpBar: { marginTop: 6, height: 10, backgroundColor: '#2a0e0e', borderRadius: 5, overflow: 'hidden' },
   hpFill: { height: '100%', backgroundColor: '#e34a4a' },
-  stickBase: {
-    position: 'absolute',
-    width: STICK_BASE,
-    height: STICK_BASE,
-    borderRadius: STICK_BASE / 2,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.25)',
-  },
-  stickKnob: {
-    position: 'absolute',
-    width: STICK_KNOB,
-    height: STICK_KNOB,
-    borderRadius: STICK_KNOB / 2,
-    backgroundColor: 'rgba(255,210,74,0.85)',
-    borderWidth: 2,
-    borderColor: '#000',
-  },
-  cluster: {
-    position: 'absolute',
-  },
-  btn: {
-    position: 'absolute',
-    borderRadius: 16,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnGas: {
-    backgroundColor: 'rgba(60,180,90,0.85)',
-    borderColor: '#0a3a18',
-  },
-  btnBrake: {
-    backgroundColor: 'rgba(220,80,80,0.85)',
-    borderColor: '#3a0a0a',
-  },
-  btnFire: {
-    backgroundColor: 'rgba(255,180,40,0.9)',
-    borderColor: '#3a2a00',
-  },
-  btnText: {
-    color: '#000',
-    fontWeight: '900',
-    fontSize: 16,
-    letterSpacing: 1,
-  },
-  abilityBtn: {
-    position: 'absolute',
-    right: 16,
-    top: 80,
-    backgroundColor: '#222',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#ffd24a',
-  },
+  wheelWrap: { position: 'absolute' },
+  cluster: { position: 'absolute' },
+  btn: { position: 'absolute', borderRadius: 16, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  btnGas: { backgroundColor: 'rgba(60,180,90,0.85)', borderColor: '#0a3a18' },
+  btnBrake: { backgroundColor: 'rgba(220,80,80,0.85)', borderColor: '#3a0a0a' },
+  btnFire: { backgroundColor: 'rgba(255,180,40,0.9)', borderColor: '#3a2a00' },
+  btnText: { color: '#000', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
+  abilityBtn: { position: 'absolute', right: 16, top: 80, backgroundColor: '#222', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, borderWidth: 2, borderColor: '#ffd24a' },
   abilityBtnDisabled: { opacity: 0.5, borderColor: '#555' },
   abilityText: { color: '#ffd24a', fontWeight: '800', letterSpacing: 1 },
-  abilityCdBar: {
-    marginTop: 6,
-    height: 4,
-    width: 90,
-    backgroundColor: '#333',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
+  abilityCdBar: { marginTop: 6, height: 4, width: 90, backgroundColor: '#333', borderRadius: 2, overflow: 'hidden' },
   abilityCdFill: { height: '100%', backgroundColor: '#ffd24a' },
 });
