@@ -17,6 +17,8 @@ export interface World {
   brakeHoldTimer: number;
   carVx: number;
   carVy: number;
+  /** Smoothed steering input -1..1 (lags raw wheel input to model wheel inertia). */
+  steeringAngle: number;
   scroll: number;
   speed: number;
   zombies: Zombie[];
@@ -80,6 +82,7 @@ export function createWorld(width: number, height: number, p: Progress): World {
     brakeHoldTimer: 0,
     carVx: 0,
     carVy: 0,
+    steeringAngle: 0,
     scroll: 0,
     speed: 0,
     zombies: [],
@@ -149,11 +152,22 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const maxReverseSpeed = stats.speed * 0.5;
   const REVERSE_HOLD_SECONDS = 0.5;
 
-  // Car model. forwardV is the speed scalar along heading; throttle/brake
-  // act on it. Steering rotates heading. Velocity is always aligned with
-  // heading (no lateral slide), so the car goes where its nose points.
-  let vF = world.forwardV;
+  // Simcade car model. Velocity has lateral momentum (vR), but tire grip is
+  // strong: lat decays fast so the body realigns with heading. Steering input
+  // is smoothed (wheel inertia). Acceleration tapers near top speed (torque
+  // curve). Steering response is responsive at low speed and progressively
+  // duller at high speed, so you can't zigzag at full throttle.
+  const sinH = Math.sin(world.heading);
+  const cosH = Math.cos(world.heading);
+  const fwdX = sinH;
+  const fwdY = -cosH;
+  const rightX = cosH;
+  const rightY = sinH;
 
+  let vF = world.carVx * fwdX + world.carVy * fwdY;
+  let vR = world.carVx * rightX + world.carVy * rightY;
+
+  // Throttle / brake / coast on forward component.
   if (input.brake) {
     if (vF > 0) {
       vF = Math.max(0, vF - stats.brakeStrength * dt);
@@ -167,7 +181,11 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
       vF = Math.max(-maxReverseSpeed, vF - stats.acceleration * dt);
     }
   } else if (input.throttle) {
-    vF = Math.min(maxSpeed, vF + stats.acceleration * nitroMul * dt);
+    // Torque curve: full thrust at low speed, tapering to ~30% at top so
+    // launches feel strong and top speed takes effort.
+    const speedFrac = Math.min(1, Math.abs(vF) / Math.max(1, maxSpeed));
+    const torqueFactor = 1 - 0.7 * speedFrac;
+    vF = Math.min(maxSpeed, vF + stats.acceleration * nitroMul * torqueFactor * dt);
     world.brakeHoldTimer = 0;
   } else {
     vF *= Math.pow(0.5, dt / 1.5);
@@ -175,16 +193,38 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     world.brakeHoldTimer = 0;
   }
 
-  const speedFactor = Math.min(1, Math.abs(vF) / Math.max(1, stats.speed * 0.4));
-  // Reverse the wheel input when going backward so steering matches a real car.
+  // Tire grip on lateral velocity. Strong but not absolute: ~2% remains/sec,
+  // so a hard turn at speed leaves a brief sense of weight before realigning.
+  vR *= Math.pow(0.02, dt);
+
+  // Smooth the wheel input toward the raw stick value to model wheel inertia.
+  // ~85% closure per second feels responsive without twitching.
+  const steerLerp = 1 - Math.pow(0.15, dt);
+  world.steeringAngle += (input.wheel - world.steeringAngle) * steerLerp;
+
+  // Speed-sensitive steering: full response below ~25% of max speed, then
+  // tapers down to ~30% at top speed. Below crawl speed, response ramps up
+  // from 0 so the car can't pivot in place.
+  const absVF = Math.abs(vF);
+  const speedNorm = Math.min(1, absVF / Math.max(1, stats.speed));
+  let speedSteer: number;
+  if (speedNorm < 0.05) {
+    speedSteer = speedNorm / 0.05;
+  } else if (speedNorm < 0.25) {
+    speedSteer = 1;
+  } else {
+    speedSteer = 1 - ((speedNorm - 0.25) / 0.75) * 0.7;
+  }
+  // Flip steering when reversing so wheel-right always sends the car right.
   const steerSign = vF >= 0 ? 1 : -1;
-  const turnRate = input.wheel * steerSign * (stats.handling / 150) * speedFactor;
+  const turnRate = world.steeringAngle * steerSign * (stats.handling / 150) * speedSteer;
   world.heading += turnRate * dt;
 
-  const sinH = Math.sin(world.heading);
-  const cosH = Math.cos(world.heading);
-  world.carVx = vF * sinH;
-  world.carVy = vF * -cosH;
+  // Recompose velocity from new heading + (vF, vR).
+  const newSinH = Math.sin(world.heading);
+  const newCosH = Math.cos(world.heading);
+  world.carVx = vF * newSinH + vR * newCosH;
+  world.carVy = vF * -newCosH + vR * newSinH;
   world.forwardV = vF;
   world.carX += world.carVx * dt;
   world.carY += world.carVy * dt;
