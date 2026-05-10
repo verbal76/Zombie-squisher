@@ -149,19 +149,10 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const maxReverseSpeed = stats.speed * 0.5;
   const REVERSE_HOLD_SECONDS = 0.5;
 
-  // Bicycle-style car model. carVx/carVy are the real velocity state. The
-  // body has a heading; forward thrust and brakes act along heading; lateral
-  // grip aligns the velocity vector with heading over time so the car carves
-  // through turns instead of snap-rotating its trajectory.
-  const sinH = Math.sin(world.heading);
-  const cosH = Math.cos(world.heading);
-  const fwdX = sinH;
-  const fwdY = -cosH;
-  const rightX = cosH;
-  const rightY = sinH;
-
-  let vF = world.carVx * fwdX + world.carVy * fwdY;
-  let vR = world.carVx * rightX + world.carVy * rightY;
+  // Car model. forwardV is the speed scalar along heading; throttle/brake
+  // act on it. Steering rotates heading. Velocity is always aligned with
+  // heading (no lateral slide), so the car goes where its nose points.
+  let vF = world.forwardV;
 
   if (input.brake) {
     if (vF > 0) {
@@ -184,19 +175,16 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     world.brakeHoldTimer = 0;
   }
 
-  // Lateral grip: exponential decay of sideways velocity. ~8% remains after 1s,
-  // so the car re-aligns quickly but still carries a touch of slide through
-  // hard cornering.
-  vR *= Math.pow(0.08, dt);
-
   const speedFactor = Math.min(1, Math.abs(vF) / Math.max(1, stats.speed * 0.4));
-  const turnRate = input.wheel * (stats.handling / 150) * speedFactor;
+  // Reverse the wheel input when going backward so steering matches a real car.
+  const steerSign = vF >= 0 ? 1 : -1;
+  const turnRate = input.wheel * steerSign * (stats.handling / 150) * speedFactor;
   world.heading += turnRate * dt;
 
-  const newSinH = Math.sin(world.heading);
-  const newCosH = Math.cos(world.heading);
-  world.carVx = vF * newSinH + vR * newCosH;
-  world.carVy = vF * -newCosH + vR * newSinH;
+  const sinH = Math.sin(world.heading);
+  const cosH = Math.cos(world.heading);
+  world.carVx = vF * sinH;
+  world.carVy = vF * -cosH;
   world.forwardV = vF;
   world.carX += world.carVx * dt;
   world.carY += world.carVy * dt;
