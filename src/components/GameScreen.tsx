@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Canvas, useFrame } from '@react-three/fiber/native';
 import * as THREE from 'three';
 import { Progress, Vehicle, Zombie, Projectile } from '../types';
@@ -28,9 +28,18 @@ const MARGIN = 24;
 const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
 
 const ISO_OFFSET_X = 700;
+const ISO_HEIGHT = 1200;
 const ISO_OFFSET_Z = 700;
-const ISO_HEIGHT = 1000;
-const ISO_ZOOM = 0.45;
+const ISO_FOV = 35;
+
+const BTN_GAS_X = 0;
+const BTN_GAS_Y = BTN_SIZE + BTN_GAP;
+const BTN_FIRE_X = BTN_SIZE + BTN_GAP;
+const BTN_FIRE_Y = 0;
+const BTN_BRAKE_X = BTN_SIZE + BTN_GAP;
+const BTN_BRAKE_Y = BTN_SIZE + BTN_GAP;
+const CLUSTER_W = BTN_SIZE * 2 + BTN_GAP;
+const CLUSTER_H = BTN_SIZE * 2 + BTN_GAP;
 
 export function GameScreen({ progress, onEnd }: Props) {
   useWindowDimensions();
@@ -78,15 +87,37 @@ export function GameScreen({ progress, onEnd }: Props) {
   const hpPct = Math.max(0, w.hp / Math.max(1, w.maxHp));
   const cdPct = ability.cooldownMs > 0 ? 1 - w.abilityCooldown / ability.cooldownMs : 1;
 
+  const updateClusterFromTouches = (e: GestureResponderEvent) => {
+    const touches = e.nativeEvent.touches;
+    let fire = false;
+    let gas = false;
+    let brake = false;
+    for (let i = 0; i < touches.length; i++) {
+      const t = touches[i];
+      const x = t.locationX;
+      const y = t.locationY;
+      if (x >= BTN_FIRE_X && x <= BTN_FIRE_X + BTN_SIZE && y >= BTN_FIRE_Y && y <= BTN_FIRE_Y + BTN_SIZE) fire = true;
+      if (x >= BTN_GAS_X && x <= BTN_GAS_X + BTN_SIZE && y >= BTN_GAS_Y && y <= BTN_GAS_Y + BTN_SIZE) gas = true;
+      if (x >= BTN_BRAKE_X && x <= BTN_BRAKE_X + BTN_SIZE && y >= BTN_BRAKE_Y && y <= BTN_BRAKE_Y + BTN_SIZE) brake = true;
+    }
+    fireRef.current = fire;
+    throttleRef.current = gas;
+    brakeRef.current = brake;
+  };
+  const releaseAllButtons = () => {
+    fireRef.current = false;
+    throttleRef.current = false;
+    brakeRef.current = false;
+  };
+
   return (
     <View style={styles.root}>
       <Canvas
         style={StyleSheet.absoluteFill}
         gl={{ antialias: true }}
-        orthographic
         camera={{
           position: [w.carX + ISO_OFFSET_X, ISO_HEIGHT, w.carY + ISO_OFFSET_Z],
-          zoom: ISO_ZOOM,
+          fov: ISO_FOV,
           near: 1,
           far: 5000,
         }}
@@ -147,32 +178,25 @@ export function GameScreen({ progress, onEnd }: Props) {
           position: 'absolute',
           right: MARGIN,
           bottom: MARGIN,
-          width: BTN_SIZE * 2 + BTN_GAP,
-          height: BTN_SIZE * 2 + BTN_GAP,
+          width: CLUSTER_W,
+          height: CLUSTER_H,
         }}
-        pointerEvents="box-none"
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={updateClusterFromTouches}
+        onResponderMove={updateClusterFromTouches}
+        onResponderRelease={releaseAllButtons}
+        onResponderTerminate={releaseAllButtons}
       >
-        <Pressable
-          onPressIn={() => (fireRef.current = true)}
-          onPressOut={() => (fireRef.current = false)}
-          style={[styles.btn, styles.btnFire, { left: 0, top: 0, width: BTN_SIZE, height: BTN_SIZE }]}
-        >
+        <View pointerEvents="none" style={[styles.btn, styles.btnFire, { left: BTN_FIRE_X, top: BTN_FIRE_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
           <Text style={styles.btnText}>FIRE</Text>
-        </Pressable>
-        <Pressable
-          onPressIn={() => (throttleRef.current = true)}
-          onPressOut={() => (throttleRef.current = false)}
-          style={[styles.btn, styles.btnGas, { left: 0, top: BTN_SIZE + BTN_GAP, width: BTN_SIZE, height: BTN_SIZE }]}
-        >
+        </View>
+        <View pointerEvents="none" style={[styles.btn, styles.btnGas, { left: BTN_GAS_X, top: BTN_GAS_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
           <Text style={styles.btnText}>GAS</Text>
-        </Pressable>
-        <Pressable
-          onPressIn={() => (brakeRef.current = true)}
-          onPressOut={() => (brakeRef.current = false)}
-          style={[styles.btn, styles.btnBrake, { left: BTN_SIZE + BTN_GAP, top: BTN_SIZE + BTN_GAP, width: BTN_SIZE, height: BTN_SIZE }]}
-        >
+        </View>
+        <View pointerEvents="none" style={[styles.btn, styles.btnBrake, { left: BTN_BRAKE_X, top: BTN_BRAKE_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
           <Text style={styles.btnText}>BRAKE</Text>
-        </Pressable>
+        </View>
       </View>
 
       {progress.selectedAbility !== 'none' && (
