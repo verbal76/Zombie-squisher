@@ -5,6 +5,13 @@ import { CHARACTER_A_B64_2 } from './character-a-2';
 import { CHARACTER_A_B64_3 } from './character-a-3';
 import { CHARACTER_A_B64_4 } from './character-a-4';
 import { CHARACTER_A_B64_5 } from './character-a-5';
+import { CHARACTER_A_B64_6 } from './character-a-6';
+import { CHARACTER_A_B64_7 } from './character-a-7';
+import { CHARACTER_A_B64_8 } from './character-a-8';
+import { CHARACTER_A_B64_9 } from './character-a-9';
+import { CHARACTER_A_B64_10 } from './character-a-10';
+import { CHARACTER_A_B64_11 } from './character-a-11';
+import { CHARACTER_A_B64_12 } from './character-a-12';
 
 export const CHARACTER_A_B64_CHUNKS: readonly string[] = [
   ...CHARACTER_A_B64_1,
@@ -12,4 +19,11 @@ export const CHARACTER_A_B64_CHUNKS: readonly string[] = [
   ...CHARACTER_A_B64_3,
   ...CHARACTER_A_B64_4,
   ...CHARACTER_A_B64_5,
+  ...CHARACTER_A_B64_6,
+  ...CHARACTER_A_B64_7,
+  ...CHARACTER_A_B64_8,
+  ...CHARACTER_A_B64_9,
+  ...CHARACTER_A_B64_10,
+  ...CHARACTER_A_B64_11,
+  ...CHARACTER_A_B64_12,
 ];
