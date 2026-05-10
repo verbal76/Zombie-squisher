@@ -27,6 +27,11 @@ const MARGIN = 24;
 
 const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
 
+const ISO_OFFSET_X = 700;
+const ISO_OFFSET_Z = 700;
+const ISO_HEIGHT = 1000;
+const ISO_ZOOM = 0.45;
+
 export function GameScreen({ progress, onEnd }: Props) {
   useWindowDimensions();
 
@@ -78,7 +83,13 @@ export function GameScreen({ progress, onEnd }: Props) {
       <Canvas
         style={StyleSheet.absoluteFill}
         gl={{ antialias: true }}
-        camera={{ position: [w.carX, 80, w.carY + 120], fov: 55, near: 1, far: 3000 }}
+        orthographic
+        camera={{
+          position: [w.carX + ISO_OFFSET_X, ISO_HEIGHT, w.carY + ISO_OFFSET_Z],
+          zoom: ISO_ZOOM,
+          near: 1,
+          far: 5000,
+        }}
       >
         <color attach="background" args={['#3a4a2e']} />
         <ambientLight intensity={0.7} />
@@ -106,7 +117,7 @@ export function GameScreen({ progress, onEnd }: Props) {
           <meshStandardMaterial color={'#2a1f15'} />
         </mesh>
 
-        <ChaseCamera worldRef={worldRef} />
+        <IsoCamera worldRef={worldRef} />
         <CarMesh worldRef={worldRef} vehicle={vehicle} />
 
         {w.zombies.map((z) => (
@@ -179,20 +190,18 @@ export function GameScreen({ progress, onEnd }: Props) {
   );
 }
 
-function ChaseCamera({ worldRef }: { worldRef: React.MutableRefObject<World> }) {
+function IsoCamera({ worldRef }: { worldRef: React.MutableRefObject<World> }) {
   const snappedRef = useRef(false);
   useFrame(({ camera }) => {
     const w = worldRef.current;
-    const dist = 1170;
-    const height = 810;
-    const tx = w.carX - Math.sin(w.heading) * dist;
-    const tz = w.carY + Math.cos(w.heading) * dist;
+    const tx = w.carX + ISO_OFFSET_X;
+    const tz = w.carY + ISO_OFFSET_Z;
     if (!snappedRef.current) {
-      camera.position.set(tx, height, tz);
+      camera.position.set(tx, ISO_HEIGHT, tz);
       snappedRef.current = true;
     } else {
       camera.position.x += (tx - camera.position.x) * 0.15;
-      camera.position.y += (height - camera.position.y) * 0.15;
+      camera.position.y += (ISO_HEIGHT - camera.position.y) * 0.15;
       camera.position.z += (tz - camera.position.z) * 0.15;
     }
     camera.lookAt(w.carX, 0, w.carY);
