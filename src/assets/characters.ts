@@ -1,9 +1,30 @@
 // Asset registry for the Kenney character GLBs (with zombified textures
-// already baked in by `scripts/embed-zombie-textures.mjs`). Each entry maps
-// to a `require()`d Expo asset module so Metro bundles the .glb at build time.
+// already baked in by `scripts/embed-zombie-textures.mjs`). Each character's
+// GLB ships as base64 chunks in a sibling `character-{letter}.ts` module so
+// the entire game travels as text-bundlable source — no binary push needed.
+// The runtime concatenates and decodes on first load via `loadCharacter()`.
 //
 // Letters O and L are the pre-made green zombies; the rest had their peach
-// or brown skin tones remapped to zombie green at build time.
+// or brown skin tones remapped to zombie green at build time, and the
+// non-human variants (D, G, H) had the zombie-O head texture grafted on.
+
+import { CHARACTER_A_B64_CHUNKS } from './character-a';
+import { CHARACTER_B_B64_CHUNKS } from './character-b';
+import { CHARACTER_C_B64_CHUNKS } from './character-c';
+import { CHARACTER_D_B64_CHUNKS } from './character-d';
+import { CHARACTER_E_B64_CHUNKS } from './character-e';
+import { CHARACTER_F_B64_CHUNKS } from './character-f';
+import { CHARACTER_G_B64_CHUNKS } from './character-g';
+import { CHARACTER_I_B64_CHUNKS } from './character-i';
+import { CHARACTER_J_B64_CHUNKS } from './character-j';
+import { CHARACTER_K_B64_CHUNKS } from './character-k';
+import { CHARACTER_L_B64_CHUNKS } from './character-l';
+import { CHARACTER_M_B64_CHUNKS } from './character-m';
+import { CHARACTER_N_B64_CHUNKS } from './character-n';
+import { CHARACTER_O_B64_CHUNKS } from './character-o';
+import { CHARACTER_P_B64_CHUNKS } from './character-p';
+import { CHARACTER_Q_B64_CHUNKS } from './character-q';
+import { CHARACTER_R_B64_CHUNKS } from './character-r';
 
 export const CHARACTER_IDS = [
   'a', 'b', 'c', 'd', 'e', 'f', 'g',
@@ -12,24 +33,24 @@ export const CHARACTER_IDS = [
 
 export type CharacterId = (typeof CHARACTER_IDS)[number];
 
-export const CHARACTER_MODULES: Record<CharacterId, number> = {
-  a: require('../../assets/characters/embedded/charactera.glb'),
-  b: require('../../assets/characters/embedded/characterb.glb'),
-  c: require('../../assets/characters/embedded/characterc.glb'),
-  d: require('../../assets/characters/embedded/characterd.glb'),
-  e: require('../../assets/characters/embedded/charactere.glb'),
-  f: require('../../assets/characters/embedded/characterf.glb'),
-  g: require('../../assets/characters/embedded/characterg.glb'),
-  i: require('../../assets/characters/embedded/characteri.glb'),
-  j: require('../../assets/characters/embedded/characterj.glb'),
-  k: require('../../assets/characters/embedded/characterk.glb'),
-  l: require('../../assets/characters/embedded/characterl.glb'),
-  m: require('../../assets/characters/embedded/characterm.glb'),
-  n: require('../../assets/characters/embedded/charactern.glb'),
-  o: require('../../assets/characters/embedded/charactero.glb'),
-  p: require('../../assets/characters/embedded/characterp.glb'),
-  q: require('../../assets/characters/embedded/characterq.glb'),
-  r: require('../../assets/characters/embedded/characterr.glb'),
+export const CHARACTER_B64_CHUNKS: Record<CharacterId, readonly string[]> = {
+  a: CHARACTER_A_B64_CHUNKS,
+  b: CHARACTER_B_B64_CHUNKS,
+  c: CHARACTER_C_B64_CHUNKS,
+  d: CHARACTER_D_B64_CHUNKS,
+  e: CHARACTER_E_B64_CHUNKS,
+  f: CHARACTER_F_B64_CHUNKS,
+  g: CHARACTER_G_B64_CHUNKS,
+  i: CHARACTER_I_B64_CHUNKS,
+  j: CHARACTER_J_B64_CHUNKS,
+  k: CHARACTER_K_B64_CHUNKS,
+  l: CHARACTER_L_B64_CHUNKS,
+  m: CHARACTER_M_B64_CHUNKS,
+  n: CHARACTER_N_B64_CHUNKS,
+  o: CHARACTER_O_B64_CHUNKS,
+  p: CHARACTER_P_B64_CHUNKS,
+  q: CHARACTER_Q_B64_CHUNKS,
+  r: CHARACTER_R_B64_CHUNKS,
 };
 
 // Pick a stable character variant from a zombie id. Spreads the variants
