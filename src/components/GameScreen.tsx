@@ -8,6 +8,7 @@ import { ZOMBIE_DEFS } from '../data/zombies';
 import { World, createWorld, step } from '../game/engine';
 import { Thumbstick } from './Thumbstick';
 import { AboutModal } from './AboutModal';
+import { getGrassTexture } from '../render/grassTexture';
 
 interface Props {
   progress: Progress;
@@ -139,10 +140,7 @@ export function GameScreen({ progress, onEnd }: Props) {
 
         <CameraTracker carX={w.carX} carY={w.carY} />
 
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[w.carX, 0, w.carY]}>
-          <planeGeometry args={[6000, 6000]} />
-          <meshLambertMaterial color={'#3a4a2e'} />
-        </mesh>
+        <GrassGround carX={w.carX} carY={w.carY} />
 
         <CarMesh carX={w.carX} carY={w.carY} heading={w.heading} vehicle={vehicle} />
 
@@ -214,6 +212,17 @@ export function GameScreen({ progress, onEnd }: Props) {
 
       <AboutModal visible={aboutOpen} onClose={() => setAboutOpen(false)} />
     </View>
+  );
+}
+
+function GrassGround({ carX, carY }: { carX: number; carY: number }) {
+  const tex = getGrassTexture();
+  tex.offset.set(carX / 100, carY / 100);
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[carX, 0, carY]}>
+      <planeGeometry args={[6000, 6000]} />
+      <meshLambertMaterial map={tex} />
+    </mesh>
   );
 }
 
