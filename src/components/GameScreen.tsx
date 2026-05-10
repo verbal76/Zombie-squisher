@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { Canvas, useFrame } from '@react-three/fiber/native';
-import { Progress, Vehicle, Zombie, Projectile, BloodSpot } from '../types';
+import { Progress, Vehicle, Projectile, BloodSpot } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
-import { ZOMBIE_DEFS } from '../data/zombies';
 import { World, createWorld, step, KILL_SPEED, StreakBannerKind } from '../game/engine';
 import { Thumbstick, ThumbstickHandle } from './Thumbstick';
 import { AboutModal } from './AboutModal';
+import { ZombieCharacter } from './ZombieCharacter';
 import { getGrassTexture } from '../render/grassTexture';
 
 interface Props {
@@ -18,8 +18,6 @@ interface Props {
 const ARENA_W = 1200;
 const ARENA_H = 1200;
 const CAR_DEPTH = 18;
-const ZOMBIE_DEPTH = 16;
-const BOSS_DEPTH = 28;
 const CAR_LIFT = 1;
 
 const WHEEL_SIZE = 170;
@@ -198,7 +196,7 @@ export function GameScreen({ progress, onEnd }: Props) {
           <BloodMesh key={b.id} blood={b} />
         ))}
         {w.zombies.map((z) => (
-          <ZombieMesh key={z.id} z={z} />
+          <ZombieCharacter key={z.id} z={z} />
         ))}
         {w.projectiles.map((pr) => (
           <ProjectileMesh key={pr.id} pr={pr} />
@@ -409,24 +407,6 @@ function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
         </mesh>
       </group>
     </group>
-  );
-}
-
-function ZombieMesh({ z }: { z: Zombie }) {
-  const meshRef = useRef<any>(null);
-  const def = ZOMBIE_DEFS[z.kind];
-  const isBoss = z.kind === 'boss';
-  const depth = isBoss ? BOSS_DEPTH : ZOMBIE_DEPTH;
-  const side = z.size * 2;
-  useFrame(() => {
-    if (!meshRef.current) return;
-    meshRef.current.position.set(z.x, depth / 2, z.y);
-  });
-  return (
-    <mesh ref={meshRef}>
-      <boxGeometry args={[side, depth, side]} />
-      <meshLambertMaterial color={def.color} />
-    </mesh>
   );
 }
 
