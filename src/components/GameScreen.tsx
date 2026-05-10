@@ -139,7 +139,7 @@ export function GameScreen({ progress, onEnd }: Props) {
 
         <CameraTracker carX={w.carX} carY={w.carY} />
 
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[ARENA_W / 2, 0, ARENA_H / 2]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[w.carX, 0, w.carY]}>
           <planeGeometry args={[6000, 6000]} />
           <meshLambertMaterial color={'#3a4a2e'} />
         </mesh>

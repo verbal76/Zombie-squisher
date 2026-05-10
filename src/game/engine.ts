@@ -180,13 +180,6 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   world.carX += vx * dt;
   world.carY += vy * dt;
 
-  const halfW = vehicle.width / 2;
-  const halfH = vehicle.height / 2;
-  if (world.carX < halfW + 10) { world.carX = halfW + 10; world.forwardV *= 0.3; }
-  if (world.carX > world.width - halfW - 10) { world.carX = world.width - halfW - 10; world.forwardV *= 0.3; }
-  if (world.carY < halfH + 10) { world.carY = halfH + 10; world.forwardV *= 0.3; }
-  if (world.carY > world.height - halfH - 10) { world.carY = world.height - halfH - 10; world.forwardV *= 0.3; }
-
   world.speed = world.forwardV;
   const bumperBonus = isNitro ? 2 : 1;
 
@@ -292,8 +285,14 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     }
   }
 
-  world.zombies = world.zombies.filter((z) => z.hp > 0 && z.y > -200 && z.y < world.height + 200 && z.x > -200 && z.x < world.width + 200);
-  world.projectiles = world.projectiles.filter((p) => p.life > 0 && p.y > -40 && p.y < world.height + 40 && p.x > -40 && p.x < world.width + 40);
+  const despawnSq = 1400 * 1400;
+  world.zombies = world.zombies.filter((z) => {
+    if (z.hp <= 0) return false;
+    const ddx = z.x - world.carX;
+    const ddy = z.y - world.carY;
+    return ddx * ddx + ddy * ddy < despawnSq;
+  });
+  world.projectiles = world.projectiles.filter((p) => p.life > 0);
   world.bloodSpots = world.bloodSpots.filter((b) => b.alpha > 0);
 
   if (world.hp <= 0) { world.hp = 0; world.gameOver = true; }
@@ -316,16 +315,14 @@ function spawnBlood(world: World, z: Zombie): void {
   }
 }
 
+const SPAWN_RING_RADIUS = 750;
+
 function spawnZombie(world: World, forceBoss: boolean): void {
   const kind = forceBoss ? 'boss' : pickZombieKind(world.wave);
   const def = ZOMBIE_DEFS[kind];
-  const side = Math.floor(Math.random() * 4);
-  let x: number;
-  let y: number;
-  if (side === 0) { x = Math.random() * world.width; y = -20; }
-  else if (side === 1) { x = world.width + 20; y = Math.random() * world.height; }
-  else if (side === 2) { x = Math.random() * world.width; y = world.height + 20; }
-  else { x = -20; y = Math.random() * world.height; }
+  const angle = Math.random() * Math.PI * 2;
+  const x = world.carX + Math.cos(angle) * SPAWN_RING_RADIUS;
+  const y = world.carY + Math.sin(angle) * SPAWN_RING_RADIUS;
   const dx = world.carX - x;
   const dy = world.carY - y;
   const dist = Math.hypot(dx, dy) || 1;
