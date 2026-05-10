@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { Canvas, useFrame } from '@react-three/fiber/native';
+import { Object3D } from 'three';
 import { Progress, Vehicle, Projectile, BloodSpot } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
 import { World, createWorld, step, KILL_SPEED, StreakBannerKind } from '../game/engine';
+import { VEHICLE_GLB } from '../data/objects';
+import { loadVehicleGLB } from '../render/loadVehicle';
 import { Thumbstick, ThumbstickHandle } from './Thumbstick';
 import { AboutModal } from './AboutModal';
 import { ZombieCharacter } from './ZombieCharacter';
@@ -360,8 +363,13 @@ function BloodMesh({ blood }: { blood: BloodSpot }) {
 }
 
 const CAR_VISUAL_SCALE = 1.2;
-const MAX_BODY_PITCH = 0.12;  // ~7° nose dive / squat — heavier weight transfer
-const MAX_BODY_ROLL = 0.14;   // ~8° cornering lean
+const MAX_BODY_PITCH = 0.12;
+const MAX_BODY_ROLL = 0.14;
+
+// Kenney vehicle GLBs are ~1 unit wide in their own coordinate space.
+// Scale by vehicle.width so the 3D mesh footprint matches the physics AABB.
+// The GLB Y-origin is at wheel level so we lift the group by just CAR_LIFT.
+const VEH_GLB_Y = CAR_LIFT;
 
 function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const outer = useRef<any>(null);
@@ -369,20 +377,28 @@ function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const lastV = useRef(0);
   const pitch = useRef(0);
   const roll = useRef(0);
+  const [model, setModel] = useState<Object3D | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const mod = VEHICLE_GLB[vehicle.id];
+    loadVehicleGLB(mod)
+      .then((m) => { if (mounted) setModel(m); })
+      .catch((err) => console.warn('vehicle GLB load failed', vehicle.id, err?.message ?? err));
+    return () => { mounted = false; };
+  }, [vehicle.id]);
 
   useFrame((_, dt) => {
     if (!outer.current || !inner.current) return;
-    outer.current.position.set(world.carX, CAR_DEPTH / 2 + CAR_LIFT, world.carY);
+    const carY = model ? VEH_GLB_Y : CAR_DEPTH / 2 + CAR_LIFT;
+    outer.current.position.set(world.carX, carY, world.carY);
     outer.current.rotation.y = -world.heading;
 
-    // Forward acceleration drives pitch (squat on accel, dip on brake).
     const safeDt = Math.max(0.001, dt);
     const accel = (world.forwardV - lastV.current) / safeDt;
     lastV.current = world.forwardV;
 
     const targetPitch = Math.max(-MAX_BODY_PITCH, Math.min(MAX_BODY_PITCH, accel * 0.0015));
-
-    // Lateral lean from steering * speed (centripetal-like proxy).
     const speedNorm = Math.min(1, Math.abs(world.forwardV) / 250);
     const targetRoll = Math.max(-MAX_BODY_ROLL, Math.min(MAX_BODY_ROLL, world.steeringAngle * speedNorm * 0.18));
 
@@ -394,17 +410,28 @@ function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     inner.current.rotation.z = roll.current;
   });
 
+  const glbScale = vehicle.width * CAR_VISUAL_SCALE;
+
   return (
-    <group ref={outer} scale={CAR_VISUAL_SCALE}>
+    <group ref={outer}>
       <group ref={inner}>
-        <mesh position={[0, 0, 0]}>
-          <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
-          <meshLambertMaterial color={vehicle.color} />
-        </mesh>
-        <mesh position={[0, 0, -vehicle.height / 2 - 2]}>
-          <boxGeometry args={[vehicle.width * 0.95, CAR_DEPTH * 0.6, 4]} />
-          <meshLambertMaterial color={'#999'} />
-        </mesh>
+        {model ? (
+          <group scale={glbScale}>
+            <primitive object={model} />
+          </group>
+        ) : (
+          // Box fallback while GLB is loading.
+          <group scale={CAR_VISUAL_SCALE}>
+            <mesh position={[0, 0, 0]}>
+              <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
+              <meshLambertMaterial color={vehicle.color} />
+            </mesh>
+            <mesh position={[0, 0, -vehicle.height / 2 - 2]}>
+              <boxGeometry args={[vehicle.width * 0.95, CAR_DEPTH * 0.6, 4]} />
+              <meshLambertMaterial color={'#999'} />
+            </mesh>
+          </group>
+        )}
       </group>
     </group>
   );
