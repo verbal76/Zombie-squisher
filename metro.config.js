@@ -2,6 +2,11 @@
 // modern ESM-only deps (three.js 0.150+) bundle correctly. Without this,
 // three's submodule imports inside @react-three/fiber fail to resolve and
 // the Metro graph build dies with an unhelpful stack trace.
+//
+// Also registers .glb / .gltf as bundled asset extensions so
+// `require('../../assets/character-a.glb')` resolves to an Expo Asset
+// module reference rather than failing the build.
+// Build trigger: 2026-05-10 / driving overhaul slice (build #45).
 
 const { getDefaultConfig } = require('expo/metro-config');
 
