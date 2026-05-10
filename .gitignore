@@ -26,3 +26,9 @@ assets/adaptive-icon.png
 package-lock.json
 npm-shrinkwrap.json
 yarn.lock
+
+# Character GLB / texture binaries — built artifacts. The runtime ships them
+# as base64 TS modules in src/assets/character-*.ts; these binaries live here
+# so the build scripts (zombify-character-textures, embed-zombie-textures,
+# encode-glb-to-ts) can be re-run.
+assets/characters/
