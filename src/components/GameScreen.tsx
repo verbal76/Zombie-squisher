@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
-import { Canvas, useFrame, useThree } from '@react-three/fiber/native';
-import * as THREE from 'three';
+import { Canvas, useThree } from '@react-three/fiber/native';
 import { Progress, Vehicle, Zombie, Projectile } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
@@ -158,7 +157,7 @@ export function GameScreen({ progress, onEnd }: Props) {
           <meshLambertMaterial color={'#2a1f15'} />
         </mesh>
 
-        <CarMesh worldRef={worldRef} vehicle={vehicle} />
+        <CarMesh carX={w.carX} carY={w.carY} heading={w.heading} vehicle={vehicle} />
 
         {w.zombies.map((z) => (
           <ZombieMesh key={z.id} z={z} />
@@ -238,16 +237,11 @@ function StaticIsoCamera() {
   return null;
 }
 
-function CarMesh({ worldRef, vehicle }: { worldRef: React.MutableRefObject<World>; vehicle: Vehicle }) {
-  const ref = useRef<THREE.Group>(null);
-  useFrame(() => {
-    const w = worldRef.current;
-    if (!ref.current) return;
-    ref.current.position.set(w.carX, CAR_DEPTH / 2, w.carY);
-    ref.current.rotation.y = -w.heading;
-  });
+function CarMesh({ carX, carY, heading, vehicle }: {
+  carX: number; carY: number; heading: number; vehicle: Vehicle;
+}) {
   return (
-    <group ref={ref}>
+    <group position={[carX, CAR_DEPTH / 2, carY]} rotation={[0, -heading, 0]}>
       <mesh position={[0, 0, 0]}>
         <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
         <meshLambertMaterial color={vehicle.color} />

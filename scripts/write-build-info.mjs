@@ -20,7 +20,14 @@ const app = JSON.parse(readFileSync('app.json', 'utf8'));
 const appVersion         = pkg.version ?? app?.expo?.version ?? 'unknown';
 const androidVersionCode = app?.expo?.android?.versionCode ?? null;
 
-const data = { branch, commit, commitShort, dirty, builtAt, appVersion, androidVersionCode };
+const buildId = `build ${commitShort} (${branch})${dirty ? ' [dirty]' : ''}`;
+const otaId   = `OTA ${commitShort} @ ${builtAt}`;
+
+const data = {
+  branch, commit, commitShort, dirty, builtAt,
+  appVersion, androidVersionCode,
+  buildId, otaId,
+};
 
 mkdirSync(dirname(OUTPUT), { recursive: true });
 writeFileSync(OUTPUT,
@@ -29,6 +36,7 @@ writeFileSync(OUTPUT,
   `  branch: string; commit: string; commitShort: string;\n` +
   `  dirty: boolean; builtAt: string;\n` +
   `  appVersion: string; androidVersionCode: number | null;\n` +
+  `  buildId: string; otaId: string;\n` +
   `}\n` +
   `export const BUILD_INFO: BuildInfo = ${JSON.stringify(data, null, 2)};\n`
 );

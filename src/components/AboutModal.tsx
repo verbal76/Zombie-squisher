@@ -49,23 +49,22 @@ export function AboutModal({ visible, onClose }: Props) {
   const ota = readOta();
   const stale = otaIsStale(ota);
 
-  const rows: Array<[string, string, boolean?]> = [
+  const lines: Array<[string, string]> = [
     ['Build',               BUILD_VERSION],
     ['OTA',                 OTA_VERSION],
-    ['Branch',              BUILD_INFO.branch + (BUILD_INFO.dirty ? ' ⚠ dirty' : '')],
-    ['Commit',              BUILD_INFO.commitShort, true],
-    ['Full SHA',            BUILD_INFO.commit, true],
-    ['Built',               BUILD_INFO.builtAt, true],
+    ['Branch',              BUILD_INFO.branch + (BUILD_INFO.dirty ? ' (dirty)' : '')],
+    ['Commit',              BUILD_INFO.commitShort],
+    ['Full SHA',            BUILD_INFO.commit],
+    ['Built',               BUILD_INFO.builtAt],
     ['App version',         BUILD_INFO.appVersion],
     ['Android versionCode', String(BUILD_INFO.androidVersionCode ?? NA)],
     ['Runtime',             ota.runtimeVersion ?? NA],
     ['Channel',             ota.channel ?? NA],
-    ['OTA updateId',        ota.updateId ?? NA, true],
-    ['OTA createdAt',       ota.createdAt ?? NA, true],
+    ['OTA updateId',        ota.updateId ?? NA],
+    ['OTA createdAt',       ota.createdAt ?? NA],
     ['Source',              fmtBool(ota.isEmbeddedLaunch, 'embedded (APK)', 'OTA download')],
   ];
-
-  const copyText = rows.map(([k, v]) => `${k.padEnd(22, ' ')}${v}`).join('\n')
+  const text = lines.map(([k, v]) => `${k.padEnd(22, ' ')}${v}`).join('\n')
     + (stale ? '\nWARNING               OTA older than embedded bundle (stale update)' : '');
 
   return (
@@ -75,13 +74,8 @@ export function AboutModal({ visible, onClose }: Props) {
           <Text style={styles.title}>ABOUT</Text>
           <Text style={styles.subtitle}>Build identification</Text>
 
-          <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 4 }}>
-            {rows.map(([label, value, mono]) => (
-              <View style={styles.row} key={label}>
-                <Text style={styles.label}>{label}</Text>
-                <Text style={[styles.value, mono && styles.mono]} selectable>{value}</Text>
-              </View>
-            ))}
+          <ScrollView style={styles.scrollWrap} contentContainerStyle={{ paddingBottom: 4 }}>
+            <Text selectable style={styles.body}>{text}</Text>
           </ScrollView>
 
           {stale && (
@@ -90,10 +84,7 @@ export function AboutModal({ visible, onClose }: Props) {
             </Text>
           )}
 
-          <View style={styles.copyBlock}>
-            <Text style={styles.copyHint}>Long-press the block below, "Select all", then "Copy":</Text>
-            <Text style={styles.copyBox} selectable>{copyText}</Text>
-          </View>
+          <Text style={styles.hint}>Long-press the text to select, then "Copy".</Text>
 
           <Pressable onPress={onClose} style={styles.closeBtn}>
             <Text style={styles.closeText}>CLOSE</Text>
@@ -109,15 +100,10 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#1a1a1a', borderRadius: 14, borderWidth: 2, borderColor: '#ffd24a', padding: 16, width: '100%', maxWidth: 460, maxHeight: '90%' },
   title: { color: '#ffd24a', fontSize: 18, fontWeight: '900', letterSpacing: 4, textAlign: 'center' },
   subtitle: { color: '#888', fontSize: 11, fontStyle: 'italic', textAlign: 'center', marginTop: 2, marginBottom: 12 },
-  list: { maxHeight: 280 },
-  row: { flexDirection: 'row', paddingVertical: 3, borderBottomWidth: 1, borderBottomColor: '#222' },
-  label: { color: '#888', width: 130, fontSize: 12 },
-  value: { color: '#fff', flex: 1, fontSize: 12 },
-  mono: { fontFamily: 'Courier', fontSize: 11 },
+  scrollWrap: { maxHeight: 380 },
+  body: { color: '#cfd', fontFamily: 'Courier', fontSize: 12, lineHeight: 18, backgroundColor: '#0a0a0a', borderColor: '#2a2a2a', borderWidth: 1, borderRadius: 6, padding: 10 },
   warn: { color: '#ffb04a', fontSize: 12, marginTop: 10, fontWeight: '700', textAlign: 'center' },
-  copyBlock: { marginTop: 12 },
-  copyHint: { color: '#888', fontSize: 10, fontStyle: 'italic', marginBottom: 4 },
-  copyBox: { backgroundColor: '#0a0a0a', borderColor: '#2a2a2a', borderWidth: 1, borderRadius: 6, padding: 8, color: '#cfd', fontFamily: 'Courier', fontSize: 10 },
+  hint: { color: '#888', fontSize: 10, fontStyle: 'italic', marginTop: 8, textAlign: 'center' },
   closeBtn: { marginTop: 14, backgroundColor: '#2a2a2a', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
   closeText: { color: '#ffd24a', fontWeight: '800', letterSpacing: 2 },
 });
