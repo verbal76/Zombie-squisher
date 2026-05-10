@@ -21,7 +21,7 @@ const OUT = path.resolve(__dirname, '..', 'src', 'assets');
 // can carry them and the Read tool isn't capped. The registry concatenates
 // all parts at runtime.
 const CHUNK = 256;
-const PARTS_PER_CHARACTER = 5;
+const PARTS_PER_CHARACTER = 12;
 
 async function emit(letter) {
   const inPath = path.join(SRC, `character${letter}.glb`);
