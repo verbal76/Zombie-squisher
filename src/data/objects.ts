@@ -102,7 +102,6 @@ export type KartKey = keyof typeof KART_GLB;
 // ---------------------------------------------------------------------------
 export const EXTRA_VEHICLE_GLB = {
   dragRacer:     require('../../assets/vehicle-drag-racer.glb'),
-  monsterTruck:  require('../../assets/vehicle-monster-truck.glb'),
   racerLow:      require('../../assets/vehicle-racer-low.glb'),
   racer:         require('../../assets/vehicle-racer.glb'),
   speedster:     require('../../assets/vehicle-speedster.glb'),
@@ -111,6 +110,7 @@ export const EXTRA_VEHICLE_GLB = {
   vehicleSuv:    require('../../assets/vehicle-suv.glb'),
   vehicleTruck:  require('../../assets/vehicle-truck.glb'),
   vintageRacer:  require('../../assets/vehicle-vintage-racer.glb'),
+  raceFuture:    require('../../assets/race-future.glb'),
   van:           require('../../assets/van.glb'),
   firetruck:     require('../../assets/firetruck.glb'),
   garbageTruck:  require('../../assets/garbage-truck.glb'),
@@ -120,6 +120,68 @@ export const EXTRA_VEHICLE_GLB = {
   tractorPolice: require('../../assets/tractor-police.glb'),
   tractorShovel: require('../../assets/tractor-shovel.glb'),
 } as const;
+
+// ---------------------------------------------------------------------------
+// Weapons — blasters, bullets, grenades, scopes, silencers, smoke.
+// All share the colormap.png atlas via loadVehicleGLB().
+// ---------------------------------------------------------------------------
+
+// 18 blaster variants (a–r) the player car can mount as its primary weapon.
+export const BLASTER_GLB = {
+  a: require('../../assets/blaster-a.glb'),
+  b: require('../../assets/blaster-b.glb'),
+  c: require('../../assets/blaster-c.glb'),
+  d: require('../../assets/blaster-d.glb'),
+  e: require('../../assets/blaster-e.glb'),
+  f: require('../../assets/blaster-f.glb'),
+  g: require('../../assets/blaster-g.glb'),
+  h: require('../../assets/blaster-h.glb'),
+  i: require('../../assets/blaster-i.glb'),
+  j: require('../../assets/blaster-j.glb'),
+  k: require('../../assets/blaster-k.glb'),
+  l: require('../../assets/blaster-l.glb'),
+  m: require('../../assets/blaster-m.glb'),
+  n: require('../../assets/blaster-n.glb'),
+  o: require('../../assets/blaster-o.glb'),
+  p: require('../../assets/blaster-p.glb'),
+  q: require('../../assets/blaster-q.glb'),
+  r: require('../../assets/blaster-r.glb'),
+} as const;
+export type BlasterKey = keyof typeof BLASTER_GLB;
+
+// Foam-dart projectiles fired by blasters / the MG weapon.
+export const BULLET_GLB = {
+  foam:         require('../../assets/bullet-foam.glb'),
+  foamThick:    require('../../assets/bullet-foam-thick.glb'),
+  foamTip:      require('../../assets/bullet-foam-tip.glb'),
+  foamTipThick: require('../../assets/bullet-foam-tip-thick.glb'),
+} as const;
+export type BulletKey = keyof typeof BULLET_GLB;
+
+// Grenades — thrown / dropped explosives.
+export const GRENADE_GLB = {
+  a: require('../../assets/grenade-a.glb'),
+  b: require('../../assets/grenade-b.glb'),
+} as const;
+export type GrenadeKey = keyof typeof GRENADE_GLB;
+
+// Optical attachments mounted on top of blasters.
+export const SCOPE_GLB = {
+  small:  require('../../assets/scope-small.glb'),
+  largeA: require('../../assets/scope-large-a.glb'),
+  largeB: require('../../assets/scope-large-b.glb'),
+} as const;
+export type ScopeKey = keyof typeof SCOPE_GLB;
+
+// Muzzle attachments for blasters.
+export const SILENCER_GLB = {
+  small:  require('../../assets/silencer-small.glb'),
+  larger: require('../../assets/silencer-larger.glb'),
+} as const;
+export type SilencerKey = keyof typeof SILENCER_GLB;
+
+// Standalone smoke prop — used for explosion plumes, exhaust, etc.
+export const SMOKE_GLB = require('../../assets/smoke.glb');
 
 // ---------------------------------------------------------------------------
 // Trains — ambient scenery / future hazard spawns.
