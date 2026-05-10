@@ -8,9 +8,23 @@
 // units to game-world units. CarMesh uses `vehicle.width` as the X scale basis.
 
 import { Asset } from 'expo-asset';
+import * as FileSystem from 'expo-file-system';
 import { Group, Object3D, Texture, TextureLoader } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { COLORMAP_TEX } from '../data/objects';
+
+async function readBufferFromUri(uri: string): Promise<ArrayBuffer> {
+  // fetch() of file:// URIs is unreliable on Android (empty body / hangs).
+  // Read via expo-file-system as base64, then decode to ArrayBuffer using
+  // Hermes' global atob.
+  const b64 = await FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  const binStr = atob(b64);
+  const bytes = new Uint8Array(binStr.length);
+  for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+  return bytes.buffer;
+}
 
 const cache: Map<number, Group> = new Map();
 const loading: Map<number, Promise<Group>> = new Map();
@@ -80,7 +94,7 @@ async function loadOnce(mod: number): Promise<Group> {
   await asset.downloadAsync();
   const uri = asset.localUri ?? asset.uri;
   if (!uri) throw new Error('vehicle GLB: no URI');
-  const raw = await fetch(uri).then((r) => r.arrayBuffer());
+  const raw = await readBufferFromUri(uri);
   const patched = stripExternalImageUris(raw);
 
   const loader = new GLTFLoader();
