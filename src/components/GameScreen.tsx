@@ -20,7 +20,7 @@ const CAR_DEPTH = 18;
 const ZOMBIE_DEPTH = 16;
 const BOSS_DEPTH = 28;
 
-const WHEEL_SIZE = 150;
+const WHEEL_SIZE = 195;
 const BTN_SIZE = 78;
 const BTN_GAP = 12;
 const MARGIN = 24;
@@ -80,12 +80,12 @@ export function GameScreen({ progress, onEnd }: Props) {
         gl={{ antialias: true }}
         camera={{ position: [w.carX, 80, w.carY + 120], fov: 55, near: 1, far: 3000 }}
       >
-        <color attach="background" args={['#1a1a1a']} />
-        <ambientLight intensity={0.55} />
+        <color attach="background" args={['#3a4a2e']} />
+        <ambientLight intensity={0.7} />
         <directionalLight position={[400, 600, 200]} intensity={0.9} />
 
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[ARENA_W / 2, 0, ARENA_H / 2]}>
-          <planeGeometry args={[ARENA_W, ARENA_H]} />
+          <planeGeometry args={[6000, 6000]} />
           <meshStandardMaterial color={'#3a4a2e'} />
         </mesh>
 
@@ -149,18 +149,18 @@ export function GameScreen({ progress, onEnd }: Props) {
           <Text style={styles.btnText}>FIRE</Text>
         </Pressable>
         <Pressable
-          onPressIn={() => (brakeRef.current = true)}
-          onPressOut={() => (brakeRef.current = false)}
-          style={[styles.btn, styles.btnBrake, { left: 0, top: BTN_SIZE + BTN_GAP, width: BTN_SIZE, height: BTN_SIZE }]}
-        >
-          <Text style={styles.btnText}>BRAKE</Text>
-        </Pressable>
-        <Pressable
           onPressIn={() => (throttleRef.current = true)}
           onPressOut={() => (throttleRef.current = false)}
-          style={[styles.btn, styles.btnGas, { left: BTN_SIZE + BTN_GAP, top: BTN_SIZE + BTN_GAP, width: BTN_SIZE, height: BTN_SIZE }]}
+          style={[styles.btn, styles.btnGas, { left: 0, top: BTN_SIZE + BTN_GAP, width: BTN_SIZE, height: BTN_SIZE }]}
         >
           <Text style={styles.btnText}>GAS</Text>
+        </Pressable>
+        <Pressable
+          onPressIn={() => (brakeRef.current = true)}
+          onPressOut={() => (brakeRef.current = false)}
+          style={[styles.btn, styles.btnBrake, { left: BTN_SIZE + BTN_GAP, top: BTN_SIZE + BTN_GAP, width: BTN_SIZE, height: BTN_SIZE }]}
+        >
+          <Text style={styles.btnText}>BRAKE</Text>
         </Pressable>
       </View>
 
@@ -180,15 +180,21 @@ export function GameScreen({ progress, onEnd }: Props) {
 }
 
 function ChaseCamera({ worldRef }: { worldRef: React.MutableRefObject<World> }) {
+  const snappedRef = useRef(false);
   useFrame(({ camera }) => {
     const w = worldRef.current;
-    const dist = 1300;
-    const height = 900;
+    const dist = 1170;
+    const height = 810;
     const tx = w.carX - Math.sin(w.heading) * dist;
     const tz = w.carY + Math.cos(w.heading) * dist;
-    camera.position.x += (tx - camera.position.x) * 0.15;
-    camera.position.y += (height - camera.position.y) * 0.15;
-    camera.position.z += (tz - camera.position.z) * 0.15;
+    if (!snappedRef.current) {
+      camera.position.set(tx, height, tz);
+      snappedRef.current = true;
+    } else {
+      camera.position.x += (tx - camera.position.x) * 0.15;
+      camera.position.y += (height - camera.position.y) * 0.15;
+      camera.position.z += (tz - camera.position.z) * 0.15;
+    }
     camera.lookAt(w.carX, 0, w.carY);
   });
   return null;
