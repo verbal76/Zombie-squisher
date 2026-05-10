@@ -27,6 +27,8 @@ export interface Vehicle {
   killCost: number;
   width: number;
   height: number;
+  /** Realistic top speed for HUD display only; no gameplay effect. */
+  topSpeedMph: number;
 }
 
 export interface Weapon {

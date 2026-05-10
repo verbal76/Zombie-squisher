@@ -210,10 +210,14 @@ export function GameScreen({ progress, onEnd }: Props) {
           <Text style={styles.hudKills}>KILLS {w.kills}</Text>
           <Text style={styles.hudWave}>WAVE {w.wave + 1}</Text>
         </View>
+        <View style={styles.gaugeLabelRow}>
+          <Text style={styles.gaugeLabel}>VEHICLE HP</Text>
+          <Text style={styles.gaugeReadout}>{Math.round(w.hp)} / {Math.round(w.maxHp)}</Text>
+        </View>
         <View style={styles.hpBar}>
           <View style={[styles.hpFill, { width: `${hpPct * 100}%` }]} />
         </View>
-        <MomentumBar world={w} vehicleMaxSpeed={vehicle.baseSpeed} />
+        <SpeedBar world={w} vehicle={vehicle} />
         {w.streak > 0 && (
           <Text style={styles.streakText}>STREAK ×{w.streak}</Text>
         )}
@@ -308,21 +312,29 @@ function GrassGround({ world }: { world: World }) {
 }
 
 function CameraTracker({ world }: { world: World }) {
-  const focal = useRef<{ x: number; y: number; init: boolean }>({ x: 0, y: 0, init: false });
+  const focal = useRef<{ x: number; y: number; vx: number; vy: number; init: boolean }>({ x: 0, y: 0, vx: 0, vy: 0, init: false });
   useFrame((state, dt) => {
     const f = focal.current;
     if (!f.init) {
       f.x = world.carX;
       f.y = world.carY;
+      f.vx = world.carVx;
+      f.vy = world.carVy;
       f.init = true;
     }
-    // Aim point leads the car along its velocity (look-ahead = ~0.18s of travel),
-    // so the camera shows more space in the direction we're moving.
-    const lookAhead = 0.18;
-    const targetX = world.carX + world.carVx * lookAhead;
-    const targetY = world.carY + world.carVy * lookAhead;
-    // Strong lerp: ~99.9% closure/sec. Tight but adds a hint of follow lag.
-    const lerp = 1 - Math.pow(0.001, dt);
+    // Smoothed camera velocity: the lookahead reads from this lagged value, not
+    // the instantaneous car velocity. Without smoothing, sudden braking pops
+    // the focal point and the world appears to lurch forward (which made it
+    // feel like the gas pedal controlled zombie speed).
+    const vLerp = 1 - Math.pow(0.2, dt);
+    f.vx += (world.carVx - f.vx) * vLerp;
+    f.vy += (world.carVy - f.vy) * vLerp;
+    // Mild lookahead so player sees a bit more space in the direction of travel.
+    const lookAhead = 0.06;
+    const targetX = world.carX + f.vx * lookAhead;
+    const targetY = world.carY + f.vy * lookAhead;
+    // Tight focal follow keeps the car centered.
+    const lerp = 1 - Math.pow(0.02, dt);
     f.x += (targetX - f.x) * lerp;
     f.y += (targetY - f.y) * lerp;
     // Shake: small random offset scaled by world.shake (kill / explosion impulse).
@@ -442,17 +454,25 @@ function projectileBoxStyle(kind: string) {
   }
 }
 
-function MomentumBar({ world, vehicleMaxSpeed }: { world: World; vehicleMaxSpeed: number }) {
-  // Smoothed momentum 0..1; tick mark at the kill threshold.
+function SpeedBar({ world, vehicle }: { world: World; vehicle: Vehicle }) {
+  // Bar fill is normalized momentum (0..1 of vehicle's gameplay top speed).
+  // mph readout is realistic per vehicle.
   const fillPct = Math.max(0, Math.min(1, world.momentum)) * 100;
-  const tickPct = Math.max(0, Math.min(1, KILL_SPEED / Math.max(1, vehicleMaxSpeed))) * 100;
-  const inKillRange = world.momentum * vehicleMaxSpeed >= KILL_SPEED;
+  const tickPct = Math.max(0, Math.min(1, KILL_SPEED / Math.max(1, vehicle.baseSpeed))) * 100;
+  const inKillRange = world.momentum * vehicle.baseSpeed >= KILL_SPEED;
   const fillColor = inKillRange ? '#3acb55' : '#e34a4a';
+  const mphNow = Math.round(world.momentum * vehicle.topSpeedMph);
   return (
-    <View style={styles.momentumWrap}>
-      <View style={[styles.momentumFill, { width: `${fillPct}%`, backgroundColor: fillColor }]} />
-      <View style={[styles.momentumTick, { left: `${tickPct}%` }]} />
-    </View>
+    <>
+      <View style={styles.gaugeLabelRow}>
+        <Text style={styles.gaugeLabel}>SPEED</Text>
+        <Text style={styles.gaugeReadout}>{mphNow} / {vehicle.topSpeedMph} MPH</Text>
+      </View>
+      <View style={styles.momentumWrap}>
+        <View style={[styles.momentumFill, { width: `${fillPct}%`, backgroundColor: fillColor }]} />
+        <View style={[styles.momentumTick, { left: `${tickPct}%` }]} />
+      </View>
+    </>
   );
 }
 
@@ -500,7 +520,7 @@ const styles = StyleSheet.create({
   hudRow: { flexDirection: 'row', justifyContent: 'space-between' },
   hudKills: { color: '#fff', fontWeight: '900', fontSize: 18, letterSpacing: 1 },
   hudWave: { color: '#ffd24a', fontWeight: '900', fontSize: 16 },
-  hpBar: { marginTop: 6, height: 10, backgroundColor: '#2a0e0e', borderRadius: 5, overflow: 'hidden' },
+  hpBar: { marginTop: 2, height: 10, backgroundColor: '#2a0e0e', borderRadius: 5, overflow: 'hidden' },
   hpFill: { height: '100%', backgroundColor: '#e34a4a' },
   dbg: { color: '#9ff', fontFamily: 'Courier', fontSize: 11, marginTop: 4 },
   gear: { position: 'absolute', right: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(26,26,26,0.85)', borderWidth: 2, borderColor: '#2a2a2a', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
@@ -515,9 +535,12 @@ const styles = StyleSheet.create({
   abilityText: { color: '#ffd24a', fontWeight: '800', letterSpacing: 1 },
   abilityCdBar: { marginTop: 6, height: 4, width: 90, backgroundColor: '#333', borderRadius: 2, overflow: 'hidden' },
   abilityCdFill: { height: '100%', backgroundColor: '#ffd24a' },
-  momentumWrap: { marginTop: 6, height: 6, backgroundColor: '#1a1a1a', borderRadius: 3, overflow: 'hidden', position: 'relative' },
+  momentumWrap: { marginTop: 2, height: 6, backgroundColor: '#1a1a1a', borderRadius: 3, overflow: 'hidden', position: 'relative' },
   momentumFill: { height: '100%' },
   momentumTick: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: '#ffd24a' },
+  gaugeLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
+  gaugeLabel: { color: '#ccc', fontWeight: '700', fontSize: 10, letterSpacing: 1.2 },
+  gaugeReadout: { color: '#fff', fontWeight: '700', fontSize: 10, letterSpacing: 0.6 },
   streakText: { color: '#ffd24a', fontWeight: '900', fontSize: 14, marginTop: 4, letterSpacing: 1 },
   streakBanner: { position: 'absolute', top: '32%', left: 0, right: 0, alignItems: 'center', zIndex: 20 },
   streakBannerText: { color: '#ffd24a', fontWeight: '900', fontSize: 32, letterSpacing: 3, textShadowColor: '#000', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 4 },
