@@ -19,6 +19,7 @@ const ARENA_H = 1200;
 const CAR_DEPTH = 18;
 const ZOMBIE_DEPTH = 16;
 const BOSS_DEPTH = 28;
+const CAR_LIFT = 1;
 
 const WHEEL_SIZE = 195;
 const BTN_SIZE = 78;
@@ -122,6 +123,9 @@ export function GameScreen({ progress, onEnd }: Props) {
     brakeRef.current = false;
   };
 
+  const dbgCar = `car (${w.carX.toFixed(0)}, ${w.carY.toFixed(0)})  hd=${w.heading.toFixed(2)}  v=${w.forwardV.toFixed(0)}`;
+  const dbgZ = `z=${w.zombies.length}  pr=${w.projectiles.length}  hp=${w.hp.toFixed(0)}/${w.maxHp.toFixed(0)}`;
+
   return (
     <View style={styles.root}>
       <Canvas
@@ -133,7 +137,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         <ambientLight intensity={0.85} />
         <directionalLight position={[400, 600, 200]} intensity={0.6} />
 
-        <StaticIsoCamera />
+        <CameraTracker carX={w.carX} carY={w.carY} />
 
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[ARENA_W / 2, 0, ARENA_H / 2]}>
           <planeGeometry args={[6000, 6000]} />
@@ -175,6 +179,8 @@ export function GameScreen({ progress, onEnd }: Props) {
         <View style={styles.hpBar}>
           <View style={[styles.hpFill, { width: `${hpPct * 100}%` }]} />
         </View>
+        <Text style={styles.dbg}>{dbgCar}</Text>
+        <Text style={styles.dbg}>{dbgZ}</Text>
       </View>
 
       <Pressable style={[styles.gear, { top: HUD_TOP - 2 }]} onPress={() => setAboutOpen(true)} hitSlop={8}>
@@ -228,12 +234,12 @@ export function GameScreen({ progress, onEnd }: Props) {
   );
 }
 
-function StaticIsoCamera() {
+function CameraTracker({ carX, carY }: { carX: number; carY: number }) {
   const { camera } = useThree();
   useEffect(() => {
-    camera.lookAt(ARENA_W / 2, 0, ARENA_H / 2);
-    camera.updateProjectionMatrix();
-  }, [camera]);
+    camera.position.set(carX + CAM_OFFSET_X, CAM_HEIGHT, carY + CAM_OFFSET_Z);
+    camera.lookAt(carX, 0, carY);
+  });
   return null;
 }
 
@@ -241,7 +247,7 @@ function CarMesh({ carX, carY, heading, vehicle }: {
   carX: number; carY: number; heading: number; vehicle: Vehicle;
 }) {
   return (
-    <group position={[carX, CAR_DEPTH / 2, carY]} rotation={[0, -heading, 0]}>
+    <group position={[carX, CAR_DEPTH / 2 + CAR_LIFT, carY]} rotation={[0, -heading, 0]}>
       <mesh position={[0, 0, 0]}>
         <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
         <meshLambertMaterial color={vehicle.color} />
@@ -298,6 +304,7 @@ const styles = StyleSheet.create({
   hudWave: { color: '#ffd24a', fontWeight: '900', fontSize: 16 },
   hpBar: { marginTop: 6, height: 10, backgroundColor: '#2a0e0e', borderRadius: 5, overflow: 'hidden' },
   hpFill: { height: '100%', backgroundColor: '#e34a4a' },
+  dbg: { color: '#9ff', fontFamily: 'Courier', fontSize: 11, marginTop: 4 },
   gear: { position: 'absolute', right: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(26,26,26,0.85)', borderWidth: 2, borderColor: '#2a2a2a', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   gearIcon: { color: '#ffd24a', fontSize: 22, lineHeight: 26 },
   btn: { position: 'absolute', borderRadius: 16, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
