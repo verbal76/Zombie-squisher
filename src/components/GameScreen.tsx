@@ -302,11 +302,13 @@ function CameraTracker({ carX, carY }: { carX: number; carY: number }) {
   return null;
 }
 
+const CAR_VISUAL_SCALE = 1.2;
+
 function CarMesh({ carX, carY, heading, vehicle }: {
   carX: number; carY: number; heading: number; vehicle: Vehicle;
 }) {
   return (
-    <group position={[carX, CAR_DEPTH / 2 + CAR_LIFT, carY]} rotation={[0, -heading, 0]}>
+    <group position={[carX, CAR_DEPTH / 2 + CAR_LIFT, carY]} rotation={[0, -heading, 0]} scale={CAR_VISUAL_SCALE}>
       <mesh position={[0, 0, 0]}>
         <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
         <meshLambertMaterial color={vehicle.color} />
