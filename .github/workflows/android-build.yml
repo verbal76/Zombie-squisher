@@ -8,7 +8,8 @@ on:
       - 'src/**'
       - 'agentic docs/**'
       - '**/*.md'
-      - '.github/workflows/eas-update.yml'
+      - '.github/**'
+      - 'scripts/**'
     tags:
       - 'v*'
   workflow_dispatch:
