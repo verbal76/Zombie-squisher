@@ -23,7 +23,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Section title="VEHICLES (placeholder blocks — Kenney art slots in later)">
+        <Section title="VEHICLES">
           {VEHICLE_LIST.map((v) => {
             const owned = progress.unlockedVehicles.includes(v.id);
             const selected = progress.selectedVehicle === v.id;

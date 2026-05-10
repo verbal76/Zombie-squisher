@@ -18,8 +18,6 @@ export interface Vehicle {
   id: VehicleId;
   name: string;
   color: string;
-  /** Placeholder string for the Kenney asset path you'll wire in later. */
-  assetKey: string;
   baseSpeed: number;
   baseArmor: number;
   baseHandling: number;
