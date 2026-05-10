@@ -1,9 +1,5 @@
 name: EAS Update (OTA)
 
-# Auto-fires on JS-only changes (src/**). Native/build-config changes go
-# through the APK workflow instead — OTAs can't deliver native modules,
-# and the APK already bundles fresh JS, so we never want both firing.
-
 on:
   push:
     branches:
@@ -58,6 +54,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+
+      - name: Generate build info
+        run: node scripts/write-build-info.mjs
 
       - name: Prepare icon assets
         run: npm run prepare-assets

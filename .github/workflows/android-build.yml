@@ -1,9 +1,5 @@
 name: Android APK (GitHub Runner)
 
-# Auto-fires only when a change actually requires a native rebuild — package
-# deps, app config, build config, native plugin changes. JS-only edits to
-# src/** go through the OTA workflow instead so we never duplicate delivery.
-
 on:
   push:
     branches:
@@ -60,6 +56,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+
+      - name: Generate build info
+        run: node scripts/write-build-info.mjs
 
       - name: Prepare icon assets
         run: npm run prepare-assets
