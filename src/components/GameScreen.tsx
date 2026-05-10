@@ -8,6 +8,7 @@ import { ABILITIES } from '../data/weapons';
 import { ZOMBIE_DEFS } from '../data/zombies';
 import { World, createWorld, step } from '../game/engine';
 import { SteeringWheel } from './SteeringWheel';
+import { AboutModal } from './AboutModal';
 
 interface Props {
   progress: Progress;
@@ -52,6 +53,7 @@ export function GameScreen({ progress, onEnd }: Props) {
   const abilityTriggerRef = useRef(false);
   const [, setTick] = useState(0);
   const [exited, setExited] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   const vehicle = VEHICLES[progress.selectedVehicle];
   const ability = ABILITIES[progress.selectedAbility];
@@ -159,7 +161,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         ))}
       </Canvas>
 
-      <View style={[styles.hud, { top: HUD_TOP, left: 12, right: 12 }]} pointerEvents="none">
+      <View style={[styles.hud, { top: HUD_TOP, left: 12, right: 60 }]} pointerEvents="none">
         <View style={styles.hudRow}>
           <Text style={styles.hudKills}>KILLS {w.kills}</Text>
           <Text style={styles.hudWave}>WAVE {w.wave + 1}</Text>
@@ -168,6 +170,10 @@ export function GameScreen({ progress, onEnd }: Props) {
           <View style={[styles.hpFill, { width: `${hpPct * 100}%` }]} />
         </View>
       </View>
+
+      <Pressable style={[styles.gear, { top: HUD_TOP - 2 }]} onPress={() => setAboutOpen(true)} hitSlop={8}>
+        <Text style={styles.gearIcon}>⚙</Text>
+      </Pressable>
 
       <View style={{ position: 'absolute', left: MARGIN, bottom: MARGIN }}>
         <SteeringWheel size={WHEEL_SIZE} onChange={(t) => (wheelRef.current = t)} />
@@ -210,6 +216,8 @@ export function GameScreen({ progress, onEnd }: Props) {
           </View>
         </Pressable>
       )}
+
+      <AboutModal visible={aboutOpen} onClose={() => setAboutOpen(false)} />
     </View>
   );
 }
@@ -299,6 +307,8 @@ const styles = StyleSheet.create({
   hudWave: { color: '#ffd24a', fontWeight: '900', fontSize: 16 },
   hpBar: { marginTop: 6, height: 10, backgroundColor: '#2a0e0e', borderRadius: 5, overflow: 'hidden' },
   hpFill: { height: '100%', backgroundColor: '#e34a4a' },
+  gear: { position: 'absolute', right: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(26,26,26,0.85)', borderWidth: 2, borderColor: '#2a2a2a', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
+  gearIcon: { color: '#ffd24a', fontSize: 22, lineHeight: 26 },
   btn: { position: 'absolute', borderRadius: 16, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   btnGas: { backgroundColor: 'rgba(60,180,90,0.85)', borderColor: '#0a3a18' },
   btnBrake: { backgroundColor: 'rgba(220,80,80,0.85)', borderColor: '#3a0a0a' },
