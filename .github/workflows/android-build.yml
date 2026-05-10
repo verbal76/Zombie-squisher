@@ -1,9 +1,18 @@
 name: Android APK (GitHub Runner)
 
+# Auto-fires only when a change actually requires a native rebuild — package
+# deps, app config, build config, native plugin changes. JS-only edits to
+# src/** go through the OTA workflow instead so we never duplicate delivery.
+
 on:
   push:
     branches:
       - 'Github-build-pipeline-zombie-crusher'
+    paths-ignore:
+      - 'src/**'
+      - 'agentic docs/**'
+      - '**/*.md'
+      - '.github/workflows/eas-update.yml'
     tags:
       - 'v*'
   workflow_dispatch:

@@ -1,11 +1,25 @@
 name: EAS Update (OTA)
 
-# Manual-only. The APK build already bundles the latest JS, so auto-firing
-# an OTA on every push duplicates delivery. Trigger this workflow from the
-# Actions tab when you want to push a JS hotfix to existing installed APKs
-# without waiting ~20 min for a new APK build.
+# Auto-fires on JS-only changes (src/**). Native/build-config changes go
+# through the APK workflow instead — OTAs can't deliver native modules,
+# and the APK already bundles fresh JS, so we never want both firing.
 
 on:
+  push:
+    branches:
+      - 'Github-build-pipeline-zombie-crusher'
+    paths-ignore:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'app.json'
+      - 'eas.json'
+      - 'metro.config.js'
+      - 'babel.config.js'
+      - 'tsconfig.json'
+      - '.github/**'
+      - '**/*.md'
+      - 'agentic docs/**'
+      - 'scripts/**'
   workflow_dispatch:
     inputs:
       branch:
