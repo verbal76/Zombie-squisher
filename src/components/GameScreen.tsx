@@ -252,10 +252,6 @@ function CarMesh({ carX, carY, heading, vehicle }: {
         <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
         <meshLambertMaterial color={vehicle.color} />
       </mesh>
-      <mesh position={[0, CAR_DEPTH * 0.5 + 3, -vehicle.height * 0.15]}>
-        <boxGeometry args={[vehicle.width * 0.7, 6, vehicle.height * 0.4]} />
-        <meshLambertMaterial color={'#1a2a3a'} />
-      </mesh>
       <mesh position={[0, 0, -vehicle.height / 2 - 2]}>
         <boxGeometry args={[vehicle.width * 0.95, CAR_DEPTH * 0.6, 4]} />
         <meshLambertMaterial color={'#999'} />

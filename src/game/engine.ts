@@ -11,8 +11,10 @@ export interface World {
   carY: number;
   /** Heading in radians. 0 = facing toward -Y (up the screen). */
   heading: number;
-  /** Forward speed scalar in heading direction. >= 0. */
+  /** Forward speed scalar in heading direction. Negative = reversing. */
   forwardV: number;
+  /** Seconds the brake has been held while fully stopped (drives reverse engagement). */
+  brakeHoldTimer: number;
   carVx: number;
   carVy: number;
   scroll: number;
@@ -75,6 +77,7 @@ export function createWorld(width: number, height: number, p: Progress): World {
     carY: height / 2,
     heading: 0,
     forwardV: 0,
+    brakeHoldTimer: 0,
     carVx: 0,
     carVy: 0,
     scroll: 0,
@@ -143,17 +146,31 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const isShielded = world.invuln > 0 && p.selectedAbility === 'shield' && world.abilityActive > 0;
 
   const maxSpeed = stats.speed * nitroMul;
+  const maxReverseSpeed = stats.speed * 0.5;
+  const REVERSE_HOLD_SECONDS = 1.0;
   if (input.brake) {
-    world.forwardV = Math.max(0, world.forwardV - stats.brakeStrength * dt);
+    if (world.forwardV > 0) {
+      world.forwardV = Math.max(0, world.forwardV - stats.brakeStrength * dt);
+      if (world.forwardV === 0) world.brakeHoldTimer = 0;
+    } else if (world.forwardV === 0) {
+      world.brakeHoldTimer += dt;
+      if (world.brakeHoldTimer >= REVERSE_HOLD_SECONDS) {
+        world.forwardV = -stats.acceleration * dt;
+      }
+    } else {
+      world.forwardV = Math.max(-maxReverseSpeed, world.forwardV - stats.acceleration * dt);
+    }
   } else if (input.throttle) {
     world.forwardV = Math.min(maxSpeed, world.forwardV + stats.acceleration * nitroMul * dt);
+    world.brakeHoldTimer = 0;
   } else {
     world.forwardV *= Math.pow(0.5, dt / 1.5);
-    if (world.forwardV < 1) world.forwardV = 0;
+    if (Math.abs(world.forwardV) < 1) world.forwardV = 0;
+    world.brakeHoldTimer = 0;
   }
 
-  const speedFactor = Math.min(1, world.forwardV / Math.max(1, stats.speed * 0.4));
-  const turnRate = input.wheel * stats.handling * 0.012 * speedFactor;
+  const speedFactor = Math.min(1, Math.abs(world.forwardV) / Math.max(1, stats.speed * 0.4));
+  const turnRate = input.wheel * stats.handling * 0.0096 * speedFactor;
   world.heading += turnRate * dt * 60;
 
   const vx = Math.sin(world.heading) * world.forwardV;
