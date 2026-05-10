@@ -176,14 +176,25 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const isShielded = world.invuln > 0 && p.selectedAbility === 'shield' && world.abilityActive > 0;
 
   const maxSpeed = stats.speed * nitroMul;
-  const maxReverseSpeed = stats.speed * 0.5;
-  const REVERSE_HOLD_SECONDS = 0.5;
+  const maxReverseSpeed = stats.speed * 0.3;    // reverse caps lower than forward
+  const REVERSE_HOLD_SECONDS = 1.0;             // longer hold before brake engages reverse
+  const REVERSE_ACCEL_FACTOR = 0.5;             // reverse is torque-limited, slower than forward
 
-  // Simcade car model. Velocity has lateral momentum (vR), but tire grip is
-  // strong: lat decays fast so the body realigns with heading. Steering input
-  // is smoothed (wheel inertia). Acceleration tapers near top speed (torque
-  // curve). Steering response is responsive at low speed and progressively
-  // duller at high speed, so you can't zigzag at full throttle.
+  // Heavy arcade car model.
+  //   - Velocity has independent lateral momentum (vR). Grip is dynamic, not
+  //     binary: stronger at low speed, weaker at high speed → high-speed
+  //     cornering slips and drifts.
+  //   - Coast decay is slow (long half-life), so letting off the gas carries
+  //     momentum forward rather than instantly stopping.
+  //   - Brake → reverse is a 3-phase progression: braking force, near-stop
+  //     hold, then reverse engagement after 1 s of holding brake at zero.
+  //   - Forward acceleration curve is nonlinear (torque-strong at launch,
+  //     soft near top speed). Reverse is half-strength of forward.
+  //   - Steering input is smoothed (wheel inertia) and tapers aggressively at
+  //     high speed so you can't zigzag at top speed.
+  //   - Steering wheel "snaps back" to neutral on direction changes for a
+  //     beat of recovery before re-asserting.
+
   const sinH = Math.sin(world.heading);
   const cosH = Math.cos(world.heading);
   const fwdX = sinH;
@@ -194,53 +205,73 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   let vF = world.carVx * fwdX + world.carVy * fwdY;
   let vR = world.carVx * rightX + world.carVy * rightY;
 
-  // Throttle / brake / coast on forward component.
+  // Phase the brake input into 3 distinct behaviors.
   if (input.brake) {
-    if (vF > 0) {
+    if (vF > 0.5) {
+      // Phase 1: real braking — strong negative force on forward velocity.
       vF = Math.max(0, vF - stats.brakeStrength * dt);
-      if (vF === 0) world.brakeHoldTimer = 0;
-    } else if (vF === 0) {
+      world.brakeHoldTimer = 0;
+    } else if (vF > -0.5) {
+      // Phase 2: near stopped — the brake holds the car still and arms the
+      // reverse timer. We pin vF toward 0 so it doesn't drift away while we
+      // wait. After REVERSE_HOLD_SECONDS, we shift into Phase 3.
+      vF *= Math.pow(0.05, dt);
+      if (Math.abs(vF) < 0.5) vF = 0;
       world.brakeHoldTimer += dt;
       if (world.brakeHoldTimer >= REVERSE_HOLD_SECONDS) {
-        vF = -stats.acceleration * dt;
+        vF = -stats.acceleration * REVERSE_ACCEL_FACTOR * dt;
       }
     } else {
-      vF = Math.max(-maxReverseSpeed, vF - stats.acceleration * dt);
+      // Phase 3: in reverse — brake pedal now acts as reverse throttle
+      // (torque-limited so reverse stays sluggish).
+      vF = Math.max(-maxReverseSpeed, vF - stats.acceleration * REVERSE_ACCEL_FACTOR * dt);
     }
   } else if (input.throttle) {
-    // Torque curve: full thrust at low speed, tapering to ~30% at top so
-    // launches feel strong and top speed takes effort.
+    // Nonlinear torque curve: strong launch (1.0 at v=0), tapers as a power
+    // curve toward maxSpeed (0.35 at top). Makes early acceleration feel
+    // punchy and top speed feel asymptotic.
     const speedFrac = Math.min(1, Math.abs(vF) / Math.max(1, maxSpeed));
-    const torqueFactor = 1 - 0.7 * speedFrac;
+    const torqueFactor = 1 - 0.65 * Math.pow(speedFrac, 1.5);
     vF = Math.min(maxSpeed, vF + stats.acceleration * nitroMul * torqueFactor * dt);
     world.brakeHoldTimer = 0;
   } else {
-    vF *= Math.pow(0.5, dt / 1.5);
-    if (Math.abs(vF) < 1) vF = 0;
+    // Coast: long half-life so the car carries momentum forward when the
+    // player lifts off the throttle. Was 1.5 s — now ~4 s.
+    vF *= Math.pow(0.5, dt / 4.0);
+    if (Math.abs(vF) < 0.5) vF = 0;
     world.brakeHoldTimer = 0;
   }
 
-  // Tire grip on lateral velocity. Strong but not absolute: ~2% remains/sec,
-  // so a hard turn at speed leaves a brief sense of weight before realigning.
-  vR *= Math.pow(0.02, dt);
+  // Dynamic tire grip on lateral velocity. At low speed grip is high (~5%
+  // remains/sec), at top speed grip is much looser (~50% remains/sec) so the
+  // rear slides through hard cornering. Linear interp between the two.
+  const speedFracForGrip = Math.min(1, Math.abs(vF) / Math.max(1, stats.speed));
+  const gripBase = 0.05;        // low-speed retain rate per second (very grippy)
+  const gripLoose = 0.50;       // high-speed retain rate per second (drifty)
+  const gripRetain = gripBase + (gripLoose - gripBase) * speedFracForGrip;
+  vR *= Math.pow(gripRetain, dt);
 
-  // Smooth the wheel input toward the raw stick value to model wheel inertia.
-  // ~85% closure per second feels responsive without twitching.
-  const steerLerp = 1 - Math.pow(0.15, dt);
+  // Smooth the wheel input toward the raw stick value. Slowed from 0.15 to
+  // 0.30 (~70 %/sec closure) for a heavier wheel feel and more give on
+  // direction changes.
+  const steerLerp = 1 - Math.pow(0.30, dt);
   world.steeringAngle += (input.wheel - world.steeringAngle) * steerLerp;
 
-  // Speed-sensitive steering: full response below ~25% of max speed, then
-  // tapers down to ~30% at top speed. Below crawl speed, response ramps up
-  // from 0 so the car can't pivot in place.
+  // Speed-sensitive steering authority. Full response below ~20% of max
+  // speed, tapers to ~20% at top (was 30%). Below crawl speed, response ramps
+  // up from 0 so the car can't pivot in place. Steeper falloff at the high
+  // end keeps zigzagging in check.
   const absVF = Math.abs(vF);
   const speedNorm = Math.min(1, absVF / Math.max(1, stats.speed));
   let speedSteer: number;
   if (speedNorm < 0.05) {
     speedSteer = speedNorm / 0.05;
-  } else if (speedNorm < 0.25) {
+  } else if (speedNorm < 0.20) {
     speedSteer = 1;
   } else {
-    speedSteer = 1 - ((speedNorm - 0.25) / 0.75) * 0.7;
+    // Power-curve taper: aggressive falloff into top speed.
+    const t = (speedNorm - 0.20) / 0.80;
+    speedSteer = 1 - 0.80 * Math.pow(t, 1.4);
   }
   // Flip steering when reversing so wheel-right always sends the car right.
   const steerSign = vF >= 0 ? 1 : -1;

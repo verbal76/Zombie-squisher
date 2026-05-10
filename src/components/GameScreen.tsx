@@ -360,8 +360,8 @@ function BloodMesh({ blood }: { blood: BloodSpot }) {
 }
 
 const CAR_VISUAL_SCALE = 1.2;
-const MAX_BODY_PITCH = 0.07;
-const MAX_BODY_ROLL = 0.10;
+const MAX_BODY_PITCH = 0.12;  // ~7° nose dive / squat — heavier weight transfer
+const MAX_BODY_ROLL = 0.14;   // ~8° cornering lean
 
 function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const outer = useRef<any>(null);
@@ -380,11 +380,11 @@ function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     const accel = (world.forwardV - lastV.current) / safeDt;
     lastV.current = world.forwardV;
 
-    const targetPitch = Math.max(-MAX_BODY_PITCH, Math.min(MAX_BODY_PITCH, accel * 0.0009));
+    const targetPitch = Math.max(-MAX_BODY_PITCH, Math.min(MAX_BODY_PITCH, accel * 0.0015));
 
     // Lateral lean from steering * speed (centripetal-like proxy).
     const speedNorm = Math.min(1, Math.abs(world.forwardV) / 250);
-    const targetRoll = Math.max(-MAX_BODY_ROLL, Math.min(MAX_BODY_ROLL, world.steeringAngle * speedNorm * 0.13));
+    const targetRoll = Math.max(-MAX_BODY_ROLL, Math.min(MAX_BODY_ROLL, world.steeringAngle * speedNorm * 0.18));
 
     const lerp = 1 - Math.pow(0.05, dt);
     pitch.current += (targetPitch - pitch.current) * lerp;
