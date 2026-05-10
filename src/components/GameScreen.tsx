@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { Canvas, useFrame } from '@react-three/fiber/native';
+import { GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Canvas, useFrame, useThree } from '@react-three/fiber/native';
 import * as THREE from 'three';
 import { Progress, Vehicle, Zombie, Projectile } from '../types';
 import { VEHICLES } from '../data/vehicles';
@@ -28,10 +28,19 @@ const MARGIN = 24;
 
 const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
 
-const ISO_OFFSET_X = 700;
-const ISO_HEIGHT = 1200;
-const ISO_OFFSET_Z = 700;
-const ISO_FOV = 35;
+const CAM_OFFSET_X = 800;
+const CAM_HEIGHT = 1600;
+const CAM_OFFSET_Z = 800;
+const CAM_FOV = 50;
+
+const CAMERA_CONFIG = {
+  position: [ARENA_W / 2 + CAM_OFFSET_X, CAM_HEIGHT, ARENA_H / 2 + CAM_OFFSET_Z] as [number, number, number],
+  fov: CAM_FOV,
+  near: 1,
+  far: 6000,
+};
+
+const HUD_TICK_MS = 100;
 
 const BTN_GAS_X = 0;
 const BTN_GAS_Y = BTN_SIZE + BTN_GAP;
@@ -43,8 +52,6 @@ const CLUSTER_W = BTN_SIZE * 2 + BTN_GAP;
 const CLUSTER_H = BTN_SIZE * 2 + BTN_GAP;
 
 export function GameScreen({ progress, onEnd }: Props) {
-  useWindowDimensions();
-
   const worldRef = useRef<World>(createWorld(ARENA_W, ARENA_H, progress));
   const wheelRef = useRef(0);
   const throttleRef = useRef(false);
@@ -61,6 +68,7 @@ export function GameScreen({ progress, onEnd }: Props) {
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
+    let lastHudTick = last;
     const loop = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
@@ -73,7 +81,10 @@ export function GameScreen({ progress, onEnd }: Props) {
         triggerAbility: abilityTriggerRef.current,
       }, progress);
       abilityTriggerRef.current = false;
-      setTick((t) => (t + 1) % 1000000);
+      if (now - lastHudTick >= HUD_TICK_MS) {
+        lastHudTick = now;
+        setTick((t) => (t + 1) % 1000000);
+      }
       if (w.gameOver && !exited) {
         setExited(true);
         setTimeout(() => onEnd(w.kills), 800);
@@ -117,40 +128,36 @@ export function GameScreen({ progress, onEnd }: Props) {
       <Canvas
         style={StyleSheet.absoluteFill}
         gl={{ antialias: true }}
-        camera={{
-          position: [w.carX + ISO_OFFSET_X, ISO_HEIGHT, w.carY + ISO_OFFSET_Z],
-          fov: ISO_FOV,
-          near: 1,
-          far: 5000,
-        }}
+        camera={CAMERA_CONFIG}
       >
         <color attach="background" args={['#3a4a2e']} />
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[400, 600, 200]} intensity={0.9} />
+        <ambientLight intensity={0.85} />
+        <directionalLight position={[400, 600, 200]} intensity={0.6} />
+
+        <StaticIsoCamera />
 
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[ARENA_W / 2, 0, ARENA_H / 2]}>
           <planeGeometry args={[6000, 6000]} />
-          <meshStandardMaterial color={'#3a4a2e'} />
+          <meshLambertMaterial color={'#3a4a2e'} />
         </mesh>
 
         <mesh position={[ARENA_W / 2, 8, 0]}>
           <boxGeometry args={[ARENA_W, 16, 6]} />
-          <meshStandardMaterial color={'#2a1f15'} />
+          <meshLambertMaterial color={'#2a1f15'} />
         </mesh>
         <mesh position={[ARENA_W / 2, 8, ARENA_H]}>
           <boxGeometry args={[ARENA_W, 16, 6]} />
-          <meshStandardMaterial color={'#2a1f15'} />
+          <meshLambertMaterial color={'#2a1f15'} />
         </mesh>
         <mesh position={[0, 8, ARENA_H / 2]}>
           <boxGeometry args={[6, 16, ARENA_H]} />
-          <meshStandardMaterial color={'#2a1f15'} />
+          <meshLambertMaterial color={'#2a1f15'} />
         </mesh>
         <mesh position={[ARENA_W, 8, ARENA_H / 2]}>
           <boxGeometry args={[6, 16, ARENA_H]} />
-          <meshStandardMaterial color={'#2a1f15'} />
+          <meshLambertMaterial color={'#2a1f15'} />
         </mesh>
 
-        <IsoCamera worldRef={worldRef} />
         <CarMesh worldRef={worldRef} vehicle={vehicle} />
 
         {w.zombies.map((z) => (
@@ -222,22 +229,12 @@ export function GameScreen({ progress, onEnd }: Props) {
   );
 }
 
-function IsoCamera({ worldRef }: { worldRef: React.MutableRefObject<World> }) {
-  const snappedRef = useRef(false);
-  useFrame(({ camera }) => {
-    const w = worldRef.current;
-    const tx = w.carX + ISO_OFFSET_X;
-    const tz = w.carY + ISO_OFFSET_Z;
-    if (!snappedRef.current) {
-      camera.position.set(tx, ISO_HEIGHT, tz);
-      snappedRef.current = true;
-    } else {
-      camera.position.x += (tx - camera.position.x) * 0.15;
-      camera.position.y += (ISO_HEIGHT - camera.position.y) * 0.15;
-      camera.position.z += (tz - camera.position.z) * 0.15;
-    }
-    camera.lookAt(w.carX, 0, w.carY);
-  });
+function StaticIsoCamera() {
+  const { camera } = useThree();
+  useEffect(() => {
+    camera.lookAt(ARENA_W / 2, 0, ARENA_H / 2);
+    camera.updateProjectionMatrix();
+  }, [camera]);
   return null;
 }
 
@@ -253,15 +250,15 @@ function CarMesh({ worldRef, vehicle }: { worldRef: React.MutableRefObject<World
     <group ref={ref}>
       <mesh position={[0, 0, 0]}>
         <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
-        <meshStandardMaterial color={vehicle.color} />
+        <meshLambertMaterial color={vehicle.color} />
       </mesh>
       <mesh position={[0, CAR_DEPTH * 0.5 + 3, -vehicle.height * 0.15]}>
         <boxGeometry args={[vehicle.width * 0.7, 6, vehicle.height * 0.4]} />
-        <meshStandardMaterial color={'#1a2a3a'} />
+        <meshLambertMaterial color={'#1a2a3a'} />
       </mesh>
       <mesh position={[0, 0, -vehicle.height / 2 - 2]}>
         <boxGeometry args={[vehicle.width * 0.95, CAR_DEPTH * 0.6, 4]} />
-        <meshStandardMaterial color={'#999'} />
+        <meshLambertMaterial color={'#999'} />
       </mesh>
     </group>
   );
@@ -275,7 +272,7 @@ function ZombieMesh({ z }: { z: Zombie }) {
   return (
     <mesh position={[z.x, depth / 2, z.y]}>
       <boxGeometry args={[side, depth, side]} />
-      <meshStandardMaterial color={def.color} />
+      <meshLambertMaterial color={def.color} />
     </mesh>
   );
 }
@@ -285,7 +282,7 @@ function ProjectileMesh({ pr }: { pr: Projectile }) {
   return (
     <mesh position={[pr.x, 12, pr.y]}>
       <boxGeometry args={[style.size, style.size, style.size]} />
-      <meshStandardMaterial color={style.color} emissive={style.color} emissiveIntensity={0.5} />
+      <meshBasicMaterial color={style.color} />
     </mesh>
   );
 }
