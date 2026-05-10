@@ -9,7 +9,9 @@ export interface World {
   height: number;
   carX: number;
   carY: number;
+  /** Heading in radians. 0 = facing toward -Y (up the screen). */
   heading: number;
+  /** Forward speed scalar in heading direction. >= 0. */
   forwardV: number;
   carVx: number;
   carVy: number;
@@ -45,7 +47,13 @@ export interface DerivedStats {
 export function deriveStats(p: Progress): { vehicle: Vehicle; stats: DerivedStats; weapon: Weapon } {
   const vehicle = VEHICLES[p.selectedVehicle];
   const weapon = WEAPONS[p.selectedWeapon];
-  const u = p.upgrades[vehicle.id] ?? { speed: 0, armor: 0, handling: 0, acceleration: 0 };
+  // Spread defaults FIRST, then overlay saved upgrades. Guards against saved
+  // progress objects that pre-date a field addition (e.g. before the
+  // `acceleration` field was added to UpgradeStats). Without this, an old
+  // save with `{speed:0, armor:0, handling:0}` would leave u.acceleration
+  // undefined → vehicle.baseAcceleration + undefined * 40 = NaN, which
+  // cascades through forwardV/heading/carX/carY and breaks the entire game.
+  const u = { speed: 0, armor: 0, handling: 0, acceleration: 0, ...(p.upgrades[vehicle.id] ?? {}) };
   const acceleration = vehicle.baseAcceleration + u.acceleration * 40;
   const stats: DerivedStats = {
     speed: vehicle.baseSpeed + u.speed * 25,
@@ -91,6 +99,7 @@ export function createWorld(width: number, height: number, p: Progress): World {
 }
 
 export interface UpdateInput {
+  /** -1..1 — turn input from steering wheel (negative = left). */
   wheel: number;
   throttle: boolean;
   brake: boolean;
@@ -116,9 +125,13 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     world.abilityCooldown = a.cooldownMs;
     if (p.selectedAbility === 'emp') {
       for (const z of world.zombies) {
-        if (z.kind === 'boss') z.hp -= 200;
-        else if (z.maxHp <= 60) z.hp = 0;
-        else z.vy *= 0.2;
+        if (z.kind === 'boss') {
+          z.hp -= 200;
+        } else if (z.maxHp <= 60) {
+          z.hp = 0;
+        } else {
+          z.vy *= 0.2;
+        }
       }
       world.shake = 14;
     }
@@ -180,13 +193,23 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
   if (weapon.id !== 'none' && input.fire) {
     world.fireTimer -= dt * 1000;
-    while (world.fireTimer <= 0) { fireWeapon(world, weapon, vehicle); world.fireTimer += weapon.fireRateMs; }
+    while (world.fireTimer <= 0) {
+      fireWeapon(world, weapon, vehicle);
+      world.fireTimer += weapon.fireRateMs;
+    }
   } else if (world.fireTimer < 0) {
     world.fireTimer = 0;
   }
 
-  for (const pr of world.projectiles) { pr.x += pr.vx * dt; pr.y += pr.vy * dt; pr.life -= dt; }
-  for (const b of world.bloodSpots) { b.alpha -= dt * 0.15; }
+  for (const pr of world.projectiles) {
+    pr.x += pr.vx * dt;
+    pr.y += pr.vy * dt;
+    pr.life -= dt;
+  }
+
+  for (const b of world.bloodSpots) {
+    b.alpha -= dt * 0.15;
+  }
 
   const carBox = {
     x1: world.carX - vehicle.width / 2,
@@ -194,21 +217,47 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     y1: world.carY - vehicle.height / 2,
     y2: world.carY + vehicle.height / 2,
   };
-  const sideBoxL = sideMod.reach > 0 && { x1: carBox.x1 - sideMod.reach, x2: carBox.x1, y1: carBox.y1 + 10, y2: carBox.y2 - 10 };
-  const sideBoxR = sideMod.reach > 0 && { x1: carBox.x2, x2: carBox.x2 + sideMod.reach, y1: carBox.y1 + 10, y2: carBox.y2 - 10 };
+  const sideBoxL = sideMod.reach > 0 && {
+    x1: carBox.x1 - sideMod.reach,
+    x2: carBox.x1,
+    y1: carBox.y1 + 10,
+    y2: carBox.y2 - 10,
+  };
+  const sideBoxR = sideMod.reach > 0 && {
+    x1: carBox.x2,
+    x2: carBox.x2 + sideMod.reach,
+    y1: carBox.y1 + 10,
+    y2: carBox.y2 - 10,
+  };
 
   for (const z of world.zombies) {
     if (z.hp <= 0) continue;
     const def = ZOMBIE_DEFS[z.kind];
+
     if (z.x + z.size > carBox.x1 && z.x - z.size < carBox.x2 && z.y + z.size > carBox.y1 && z.y - z.size < carBox.y2) {
       const dmg = stats.bumperDamage * bumperBonus;
       z.hp -= dmg;
-      if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); world.shake = Math.min(20, world.shake + 2); }
-      if (!isShielded && world.invuln <= 0) { world.hp -= def.contactDamage; world.invuln = 180; }
+      if (z.hp <= 0) {
+        world.kills += 1;
+        spawnBlood(world, z);
+        world.shake = Math.min(20, world.shake + 2);
+      }
+      if (!isShielded && world.invuln <= 0) {
+        world.hp -= def.contactDamage;
+        world.invuln = 180;
+      }
       continue;
     }
-    if (sideBoxL && hits(z, sideBoxL)) { z.hp -= sideMod.damage; if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); } continue; }
-    if (sideBoxR && hits(z, sideBoxR)) { z.hp -= sideMod.damage; if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); } }
+
+    if (sideBoxL && hits(z, sideBoxL)) {
+      z.hp -= sideMod.damage;
+      if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); }
+      continue;
+    }
+    if (sideBoxR && hits(z, sideBoxR)) {
+      z.hp -= sideMod.damage;
+      if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); }
+    }
   }
 
   for (const pr of world.projectiles) {

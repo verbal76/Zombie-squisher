@@ -32,10 +32,17 @@ export async function loadProgress(): Promise<Progress> {
     const raw = await AsyncStorage.getItem(KEY);
     if (!raw) return clone(DEFAULT_PROGRESS);
     const parsed = JSON.parse(raw) as Partial<Progress>;
+    // Backfill any per-vehicle upgrade fields the saved object lacks. Saves
+    // from before a field was added (e.g. acceleration) would otherwise leave
+    // that field undefined and the engine math would produce NaN.
+    const backfilledUpgrades: Record<VehicleId, UpgradeStats> = VEHICLE_LIST.reduce((acc, v) => {
+      acc[v.id] = { ...ZERO, ...(parsed.upgrades?.[v.id] ?? {}) };
+      return acc;
+    }, {} as Record<VehicleId, UpgradeStats>);
     const merged: Progress = {
       ...DEFAULT_PROGRESS,
       ...parsed,
-      upgrades: { ...DEFAULT_PROGRESS.upgrades, ...(parsed.upgrades ?? {}) },
+      upgrades: backfilledUpgrades,
     };
     if (!VEHICLES[merged.selectedVehicle]) merged.selectedVehicle = 'hatchback';
     return merged;
