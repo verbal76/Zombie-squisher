@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Canvas, useFrame } from '@react-three/fiber/native';
 import * as THREE from 'three';
 import { Progress, Vehicle, Zombie, Projectile } from '../types';
@@ -24,6 +24,8 @@ const WHEEL_SIZE = 150;
 const BTN_SIZE = 78;
 const BTN_GAP = 12;
 const MARGIN = 24;
+
+const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
 
 export function GameScreen({ progress, onEnd }: Props) {
   useWindowDimensions();
@@ -115,7 +117,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         ))}
       </Canvas>
 
-      <View style={[styles.hud, { top: 12, left: 12, right: 12 }]} pointerEvents="none">
+      <View style={[styles.hud, { top: HUD_TOP, left: 12, right: 12 }]} pointerEvents="none">
         <View style={styles.hudRow}>
           <Text style={styles.hudKills}>KILLS {w.kills}</Text>
           <Text style={styles.hudWave}>WAVE {w.wave + 1}</Text>
@@ -180,8 +182,8 @@ export function GameScreen({ progress, onEnd }: Props) {
 function ChaseCamera({ worldRef }: { worldRef: React.MutableRefObject<World> }) {
   useFrame(({ camera }) => {
     const w = worldRef.current;
-    const dist = 130;
-    const height = 90;
+    const dist = 1300;
+    const height = 900;
     const tx = w.carX - Math.sin(w.heading) * dist;
     const tz = w.carY + Math.cos(w.heading) * dist;
     camera.position.x += (tx - camera.position.x) * 0.15;
