@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
-import { Canvas, useThree } from '@react-three/fiber/native';
+import { Canvas, useFrame, useThree } from '@react-three/fiber/native';
 import { Progress, Vehicle, Zombie, Projectile } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
@@ -188,11 +188,11 @@ export function GameScreen({ progress, onEnd }: Props) {
         <ambientLight intensity={0.85} />
         <directionalLight position={[400, 600, 200]} intensity={0.6} />
 
-        <CameraTracker carX={w.carX} carY={w.carY} />
+        <CameraTracker world={w} />
 
-        <GrassGround carX={w.carX} carY={w.carY} />
+        <GrassGround world={w} />
 
-        <CarMesh carX={w.carX} carY={w.carY} heading={w.heading} vehicle={vehicle} />
+        <CarMesh world={w} vehicle={vehicle} />
 
         {w.zombies.map((z) => (
           <ZombieMesh key={z.id} z={z} />
@@ -282,52 +282,109 @@ export function GameScreen({ progress, onEnd }: Props) {
   );
 }
 
-function GrassGround({ carX, carY }: { carX: number; carY: number }) {
+function GrassGround({ world }: { world: World }) {
+  const meshRef = useRef<any>(null);
   const tex = getGrassTexture();
-  tex.offset.set(carX / 100, carY / 100);
+  useFrame(() => {
+    if (!meshRef.current) return;
+    meshRef.current.position.set(world.carX, 0, world.carY);
+    tex.offset.set(world.carX / 100, world.carY / 100);
+  });
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[carX, 0, carY]}>
+    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
       <planeGeometry args={[6000, 6000]} />
       <meshLambertMaterial map={tex} />
     </mesh>
   );
 }
 
-function CameraTracker({ carX, carY }: { carX: number; carY: number }) {
-  const { camera } = useThree();
-  useEffect(() => {
-    camera.position.set(carX + CAM_OFFSET_X, CAM_HEIGHT, carY + CAM_OFFSET_Z);
-    camera.lookAt(carX, 0, carY);
+function CameraTracker({ world }: { world: World }) {
+  const focal = useRef<{ x: number; y: number; init: boolean }>({ x: 0, y: 0, init: false });
+  useFrame((state, dt) => {
+    const f = focal.current;
+    if (!f.init) {
+      f.x = world.carX;
+      f.y = world.carY;
+      f.init = true;
+    }
+    // Aim point leads the car along its velocity (look-ahead = ~0.18s of travel),
+    // so the camera shows more space in the direction we're moving.
+    const lookAhead = 0.18;
+    const targetX = world.carX + world.carVx * lookAhead;
+    const targetY = world.carY + world.carVy * lookAhead;
+    // Strong lerp: ~99.9% closure/sec. Tight but adds a hint of follow lag.
+    const lerp = 1 - Math.pow(0.001, dt);
+    f.x += (targetX - f.x) * lerp;
+    f.y += (targetY - f.y) * lerp;
+    state.camera.position.set(f.x + CAM_OFFSET_X, CAM_HEIGHT, f.y + CAM_OFFSET_Z);
+    state.camera.lookAt(f.x, 0, f.y);
   });
   return null;
 }
 
 const CAR_VISUAL_SCALE = 1.2;
+const MAX_BODY_PITCH = 0.07;
+const MAX_BODY_ROLL = 0.10;
 
-function CarMesh({ carX, carY, heading, vehicle }: {
-  carX: number; carY: number; heading: number; vehicle: Vehicle;
-}) {
+function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
+  const outer = useRef<any>(null);
+  const inner = useRef<any>(null);
+  const lastV = useRef(0);
+  const pitch = useRef(0);
+  const roll = useRef(0);
+
+  useFrame((_, dt) => {
+    if (!outer.current || !inner.current) return;
+    outer.current.position.set(world.carX, CAR_DEPTH / 2 + CAR_LIFT, world.carY);
+    outer.current.rotation.y = -world.heading;
+
+    // Forward acceleration drives pitch (squat on accel, dip on brake).
+    const safeDt = Math.max(0.001, dt);
+    const accel = (world.forwardV - lastV.current) / safeDt;
+    lastV.current = world.forwardV;
+
+    const targetPitch = Math.max(-MAX_BODY_PITCH, Math.min(MAX_BODY_PITCH, accel * 0.0009));
+
+    // Lateral lean from steering * speed (centripetal-like proxy).
+    const speedNorm = Math.min(1, Math.abs(world.forwardV) / 250);
+    const targetRoll = Math.max(-MAX_BODY_ROLL, Math.min(MAX_BODY_ROLL, world.steeringAngle * speedNorm * 0.13));
+
+    const lerp = 1 - Math.pow(0.05, dt);
+    pitch.current += (targetPitch - pitch.current) * lerp;
+    roll.current += (targetRoll - roll.current) * lerp;
+
+    inner.current.rotation.x = pitch.current;
+    inner.current.rotation.z = roll.current;
+  });
+
   return (
-    <group position={[carX, CAR_DEPTH / 2 + CAR_LIFT, carY]} rotation={[0, -heading, 0]} scale={CAR_VISUAL_SCALE}>
-      <mesh position={[0, 0, 0]}>
-        <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
-        <meshLambertMaterial color={vehicle.color} />
-      </mesh>
-      <mesh position={[0, 0, -vehicle.height / 2 - 2]}>
-        <boxGeometry args={[vehicle.width * 0.95, CAR_DEPTH * 0.6, 4]} />
-        <meshLambertMaterial color={'#999'} />
-      </mesh>
+    <group ref={outer} scale={CAR_VISUAL_SCALE}>
+      <group ref={inner}>
+        <mesh position={[0, 0, 0]}>
+          <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
+          <meshLambertMaterial color={vehicle.color} />
+        </mesh>
+        <mesh position={[0, 0, -vehicle.height / 2 - 2]}>
+          <boxGeometry args={[vehicle.width * 0.95, CAR_DEPTH * 0.6, 4]} />
+          <meshLambertMaterial color={'#999'} />
+        </mesh>
+      </group>
     </group>
   );
 }
 
 function ZombieMesh({ z }: { z: Zombie }) {
+  const meshRef = useRef<any>(null);
   const def = ZOMBIE_DEFS[z.kind];
   const isBoss = z.kind === 'boss';
   const depth = isBoss ? BOSS_DEPTH : ZOMBIE_DEPTH;
   const side = z.size * 2;
+  useFrame(() => {
+    if (!meshRef.current) return;
+    meshRef.current.position.set(z.x, depth / 2, z.y);
+  });
   return (
-    <mesh position={[z.x, depth / 2, z.y]}>
+    <mesh ref={meshRef}>
       <boxGeometry args={[side, depth, side]} />
       <meshLambertMaterial color={def.color} />
     </mesh>
@@ -335,9 +392,14 @@ function ZombieMesh({ z }: { z: Zombie }) {
 }
 
 function ProjectileMesh({ pr }: { pr: Projectile }) {
+  const meshRef = useRef<any>(null);
   const style = projectileBoxStyle(pr.kind);
+  useFrame(() => {
+    if (!meshRef.current) return;
+    meshRef.current.position.set(pr.x, 12, pr.y);
+  });
   return (
-    <mesh position={[pr.x, 12, pr.y]}>
+    <mesh ref={meshRef}>
       <boxGeometry args={[style.size, style.size, style.size]} />
       <meshBasicMaterial color={style.color} />
     </mesh>
