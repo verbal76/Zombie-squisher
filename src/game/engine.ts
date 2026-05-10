@@ -148,37 +148,58 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const maxSpeed = stats.speed * nitroMul;
   const maxReverseSpeed = stats.speed * 0.5;
   const REVERSE_HOLD_SECONDS = 0.5;
+
+  // Bicycle-style car model. carVx/carVy are the real velocity state. The
+  // body has a heading; forward thrust and brakes act along heading; lateral
+  // grip aligns the velocity vector with heading over time so the car carves
+  // through turns instead of snap-rotating its trajectory.
+  const sinH = Math.sin(world.heading);
+  const cosH = Math.cos(world.heading);
+  const fwdX = sinH;
+  const fwdY = -cosH;
+  const rightX = cosH;
+  const rightY = sinH;
+
+  let vF = world.carVx * fwdX + world.carVy * fwdY;
+  let vR = world.carVx * rightX + world.carVy * rightY;
+
   if (input.brake) {
-    if (world.forwardV > 0) {
-      world.forwardV = Math.max(0, world.forwardV - stats.brakeStrength * dt);
-      if (world.forwardV === 0) world.brakeHoldTimer = 0;
-    } else if (world.forwardV === 0) {
+    if (vF > 0) {
+      vF = Math.max(0, vF - stats.brakeStrength * dt);
+      if (vF === 0) world.brakeHoldTimer = 0;
+    } else if (vF === 0) {
       world.brakeHoldTimer += dt;
       if (world.brakeHoldTimer >= REVERSE_HOLD_SECONDS) {
-        world.forwardV = -stats.acceleration * dt;
+        vF = -stats.acceleration * dt;
       }
     } else {
-      world.forwardV = Math.max(-maxReverseSpeed, world.forwardV - stats.acceleration * dt);
+      vF = Math.max(-maxReverseSpeed, vF - stats.acceleration * dt);
     }
   } else if (input.throttle) {
-    world.forwardV = Math.min(maxSpeed, world.forwardV + stats.acceleration * nitroMul * dt);
+    vF = Math.min(maxSpeed, vF + stats.acceleration * nitroMul * dt);
     world.brakeHoldTimer = 0;
   } else {
-    world.forwardV *= Math.pow(0.5, dt / 1.5);
-    if (Math.abs(world.forwardV) < 1) world.forwardV = 0;
+    vF *= Math.pow(0.5, dt / 1.5);
+    if (Math.abs(vF) < 1) vF = 0;
     world.brakeHoldTimer = 0;
   }
 
-  const speedFactor = Math.min(1, Math.abs(world.forwardV) / Math.max(1, stats.speed * 0.4));
-  const turnRate = input.wheel * stats.handling * 0.0096 * speedFactor;
-  world.heading += turnRate * dt * 60;
+  // Lateral grip: exponential decay of sideways velocity. ~8% remains after 1s,
+  // so the car re-aligns quickly but still carries a touch of slide through
+  // hard cornering.
+  vR *= Math.pow(0.08, dt);
 
-  const vx = Math.sin(world.heading) * world.forwardV;
-  const vy = -Math.cos(world.heading) * world.forwardV;
-  world.carVx = vx;
-  world.carVy = vy;
-  world.carX += vx * dt;
-  world.carY += vy * dt;
+  const speedFactor = Math.min(1, Math.abs(vF) / Math.max(1, stats.speed * 0.4));
+  const turnRate = input.wheel * (stats.handling / 150) * speedFactor;
+  world.heading += turnRate * dt;
+
+  const newSinH = Math.sin(world.heading);
+  const newCosH = Math.cos(world.heading);
+  world.carVx = vF * newSinH + vR * newCosH;
+  world.carVy = vF * -newCosH + vR * newSinH;
+  world.forwardV = vF;
+  world.carX += world.carVx * dt;
+  world.carY += world.carVy * dt;
 
   world.speed = world.forwardV;
   const bumperBonus = isNitro ? 2 : 1;
