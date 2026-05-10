@@ -147,7 +147,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
   const maxSpeed = stats.speed * nitroMul;
   const maxReverseSpeed = stats.speed * 0.5;
-  const REVERSE_HOLD_SECONDS = 1.0;
+  const REVERSE_HOLD_SECONDS = 0.5;
   if (input.brake) {
     if (world.forwardV > 0) {
       world.forwardV = Math.max(0, world.forwardV - stats.brakeStrength * dt);

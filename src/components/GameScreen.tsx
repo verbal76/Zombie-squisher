@@ -144,23 +144,6 @@ export function GameScreen({ progress, onEnd }: Props) {
           <meshLambertMaterial color={'#3a4a2e'} />
         </mesh>
 
-        <mesh position={[ARENA_W / 2, 8, 0]}>
-          <boxGeometry args={[ARENA_W, 16, 6]} />
-          <meshLambertMaterial color={'#2a1f15'} />
-        </mesh>
-        <mesh position={[ARENA_W / 2, 8, ARENA_H]}>
-          <boxGeometry args={[ARENA_W, 16, 6]} />
-          <meshLambertMaterial color={'#2a1f15'} />
-        </mesh>
-        <mesh position={[0, 8, ARENA_H / 2]}>
-          <boxGeometry args={[6, 16, ARENA_H]} />
-          <meshLambertMaterial color={'#2a1f15'} />
-        </mesh>
-        <mesh position={[ARENA_W, 8, ARENA_H / 2]}>
-          <boxGeometry args={[6, 16, ARENA_H]} />
-          <meshLambertMaterial color={'#2a1f15'} />
-        </mesh>
-
         <CarMesh carX={w.carX} carY={w.carY} heading={w.heading} vehicle={vehicle} />
 
         {w.zombies.map((z) => (
