@@ -1,70 +1,48 @@
-import React, { useRef } from 'react';
-import { Animated, GestureResponderEvent, PanResponder, StyleSheet, View } from 'react-native';
+import React, { forwardRef, useImperativeHandle, useRef } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
+
+export interface ThumbstickHandle {
+  setKnob(dx: number, dy: number): void;
+  springHome(): void;
+}
 
 interface Props {
   size?: number;
-  onChange: (x: number) => void;
 }
 
-export function Thumbstick({ size = 160, onChange }: Props) {
+export const Thumbstick = forwardRef<ThumbstickHandle, Props>(function Thumbstick(
+  { size = 160 },
+  ref,
+) {
   const half = size / 2;
   const knobSize = Math.round(size * 0.42);
-  const maxOffset = half - knobSize / 2 - 4;
-
   const translate = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
-  const computeFromTouch = (locationX: number, locationY: number) => {
-    let dx = locationX - half;
-    let dy = locationY - half;
-    const dist = Math.hypot(dx, dy);
-    if (dist > maxOffset && dist > 0) {
-      dx = (dx / dist) * maxOffset;
-      dy = (dy / dist) * maxOffset;
-    }
-    return { dx, dy };
-  };
-
-  const reportX = (dx: number) => {
-    onChange(Math.max(-1, Math.min(1, dx / maxOffset)));
-  };
-
-  const apply = (e: GestureResponderEvent) => {
-    const { dx, dy } = computeFromTouch(e.nativeEvent.locationX, e.nativeEvent.locationY);
-    translate.setValue({ x: dx, y: dy });
-    reportX(dx);
-  };
-
-  const release = () => {
-    Animated.spring(translate, {
-      toValue: { x: 0, y: 0 },
-      useNativeDriver: true,
-      bounciness: 4,
-      speed: 16,
-    }).start();
-    onChange(0);
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
+  useImperativeHandle(
+    ref,
+    () => ({
+      setKnob(dx: number, dy: number) {
         translate.stopAnimation();
-        apply(e);
+        translate.setValue({ x: dx, y: dy });
       },
-      onPanResponderMove: apply,
-      onPanResponderRelease: release,
-      onPanResponderTerminate: release,
+      springHome() {
+        Animated.spring(translate, {
+          toValue: { x: 0, y: 0 },
+          useNativeDriver: true,
+          bounciness: 4,
+          speed: 16,
+        }).start();
+      },
     }),
-  ).current;
+    [translate],
+  );
 
   return (
     <View
+      pointerEvents="none"
       style={[styles.base, { width: size, height: size, borderRadius: half }]}
-      {...panResponder.panHandlers}
     >
       <Animated.View
-        pointerEvents="none"
         style={[
           styles.knob,
           {
@@ -77,7 +55,7 @@ export function Thumbstick({ size = 160, onChange }: Props) {
       />
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   base: {

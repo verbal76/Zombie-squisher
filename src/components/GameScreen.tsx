@@ -6,7 +6,7 @@ import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
 import { ZOMBIE_DEFS } from '../data/zombies';
 import { World, createWorld, step } from '../game/engine';
-import { Thumbstick } from './Thumbstick';
+import { Thumbstick, ThumbstickHandle } from './Thumbstick';
 import { AboutModal } from './AboutModal';
 import { getGrassTexture } from '../render/grassTexture';
 
@@ -29,9 +29,9 @@ const MARGIN = 24;
 
 const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
 
-const CAM_OFFSET_X = 800;
-const CAM_HEIGHT = 1600;
-const CAM_OFFSET_Z = 800;
+const CAM_OFFSET_X = 640;
+const CAM_HEIGHT = 1280;
+const CAM_OFFSET_Z = 640;
 const CAM_FOV = 50;
 
 const CAMERA_CONFIG = {
@@ -51,6 +51,11 @@ const BTN_BRAKE_X = BTN_SIZE + BTN_GAP;
 const BTN_BRAKE_Y = BTN_SIZE + BTN_GAP;
 const CLUSTER_W = BTN_SIZE * 2 + BTN_GAP;
 const CLUSTER_H = BTN_SIZE * 2 + BTN_GAP;
+
+const STICK_KNOB_SIZE = Math.round(WHEEL_SIZE * 0.42);
+const STICK_MAX_OFFSET = WHEEL_SIZE / 2 - STICK_KNOB_SIZE / 2 - 4;
+const STICK_GRAB_RADIUS = WHEEL_SIZE / 2 + 24;
+const CONTROL_OVERLAY_H = Math.max(WHEEL_SIZE, CLUSTER_H) + MARGIN * 2;
 
 export function GameScreen({ progress, onEnd }: Props) {
   const worldRef = useRef<World>(createWorld(ARENA_W, ARENA_H, progress));
@@ -101,24 +106,69 @@ export function GameScreen({ progress, onEnd }: Props) {
   const hpPct = Math.max(0, w.hp / Math.max(1, w.maxHp));
   const cdPct = ability.cooldownMs > 0 ? 1 - w.abilityCooldown / ability.cooldownMs : 1;
 
-  const updateClusterFromTouches = (e: GestureResponderEvent) => {
+  const stickRef = useRef<ThumbstickHandle>(null);
+  const overlayLayoutRef = useRef({ width: 0, height: CONTROL_OVERLAY_H });
+
+  const updateFromTouches = (e: GestureResponderEvent) => {
     const touches = e.nativeEvent.touches;
+    const overlayW = overlayLayoutRef.current.width;
+    const overlayH = overlayLayoutRef.current.height;
+
+    const stickCx = MARGIN + WHEEL_SIZE / 2;
+    const stickCy = overlayH - MARGIN - WHEEL_SIZE / 2;
+    const clusterX0 = overlayW - MARGIN - CLUSTER_W;
+    const clusterY0 = overlayH - MARGIN - CLUSTER_H;
+
     let fire = false;
     let gas = false;
     let brake = false;
+    let stickFound = false;
+
     for (let i = 0; i < touches.length; i++) {
       const t = touches[i];
       const x = t.locationX;
       const y = t.locationY;
-      if (x >= BTN_FIRE_X && x <= BTN_FIRE_X + BTN_SIZE && y >= BTN_FIRE_Y && y <= BTN_FIRE_Y + BTN_SIZE) fire = true;
-      if (x >= BTN_GAS_X && x <= BTN_GAS_X + BTN_SIZE && y >= BTN_GAS_Y && y <= BTN_GAS_Y + BTN_SIZE) gas = true;
-      if (x >= BTN_BRAKE_X && x <= BTN_BRAKE_X + BTN_SIZE && y >= BTN_BRAKE_Y && y <= BTN_BRAKE_Y + BTN_SIZE) brake = true;
+
+      if (!stickFound) {
+        const dx = x - stickCx;
+        const dy = y - stickCy;
+        if (Math.hypot(dx, dy) <= STICK_GRAB_RADIUS) {
+          let cx = dx;
+          let cy = dy;
+          const dist = Math.hypot(cx, cy);
+          if (dist > STICK_MAX_OFFSET && dist > 0) {
+            cx = (cx / dist) * STICK_MAX_OFFSET;
+            cy = (cy / dist) * STICK_MAX_OFFSET;
+          }
+          stickRef.current?.setKnob(cx, cy);
+          wheelRef.current = Math.max(-1, Math.min(1, cx / STICK_MAX_OFFSET));
+          stickFound = true;
+          continue;
+        }
+      }
+
+      const bx = x - clusterX0;
+      const by = y - clusterY0;
+      if (bx >= 0 && bx <= CLUSTER_W && by >= 0 && by <= CLUSTER_H) {
+        if (bx >= BTN_FIRE_X && bx <= BTN_FIRE_X + BTN_SIZE && by >= BTN_FIRE_Y && by <= BTN_FIRE_Y + BTN_SIZE) fire = true;
+        if (bx >= BTN_GAS_X && bx <= BTN_GAS_X + BTN_SIZE && by >= BTN_GAS_Y && by <= BTN_GAS_Y + BTN_SIZE) gas = true;
+        if (bx >= BTN_BRAKE_X && bx <= BTN_BRAKE_X + BTN_SIZE && by >= BTN_BRAKE_Y && by <= BTN_BRAKE_Y + BTN_SIZE) brake = true;
+      }
     }
+
+    if (!stickFound) {
+      stickRef.current?.springHome();
+      wheelRef.current = 0;
+    }
+
     fireRef.current = fire;
     throttleRef.current = gas;
     brakeRef.current = brake;
   };
-  const releaseAllButtons = () => {
+
+  const releaseAllControls = () => {
+    stickRef.current?.springHome();
+    wheelRef.current = 0;
     fireRef.current = false;
     throttleRef.current = false;
     brakeRef.current = false;
@@ -168,33 +218,50 @@ export function GameScreen({ progress, onEnd }: Props) {
         <Text style={styles.gearIcon}>⚙</Text>
       </Pressable>
 
-      <View style={{ position: 'absolute', left: MARGIN, bottom: MARGIN }}>
-        <Thumbstick size={WHEEL_SIZE} onChange={(t) => (wheelRef.current = t)} />
-      </View>
-
       <View
         style={{
           position: 'absolute',
-          right: MARGIN,
-          bottom: MARGIN,
-          width: CLUSTER_W,
-          height: CLUSTER_H,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: CONTROL_OVERLAY_H,
+        }}
+        onLayout={(e) => {
+          overlayLayoutRef.current = {
+            width: e.nativeEvent.layout.width,
+            height: e.nativeEvent.layout.height,
+          };
         }}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
-        onResponderGrant={updateClusterFromTouches}
-        onResponderMove={updateClusterFromTouches}
-        onResponderRelease={releaseAllButtons}
-        onResponderTerminate={releaseAllButtons}
+        onResponderGrant={updateFromTouches}
+        onResponderMove={updateFromTouches}
+        onResponderRelease={releaseAllControls}
+        onResponderTerminate={releaseAllControls}
       >
-        <View pointerEvents="none" style={[styles.btn, styles.btnFire, { left: BTN_FIRE_X, top: BTN_FIRE_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
-          <Text style={styles.btnText}>FIRE</Text>
+        <View style={{ position: 'absolute', left: MARGIN, bottom: MARGIN }}>
+          <Thumbstick ref={stickRef} size={WHEEL_SIZE} />
         </View>
-        <View pointerEvents="none" style={[styles.btn, styles.btnGas, { left: BTN_GAS_X, top: BTN_GAS_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
-          <Text style={styles.btnText}>GAS</Text>
-        </View>
-        <View pointerEvents="none" style={[styles.btn, styles.btnBrake, { left: BTN_BRAKE_X, top: BTN_BRAKE_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
-          <Text style={styles.btnText}>BRAKE</Text>
+
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            right: MARGIN,
+            bottom: MARGIN,
+            width: CLUSTER_W,
+            height: CLUSTER_H,
+          }}
+        >
+          <View style={[styles.btn, styles.btnFire, { left: BTN_FIRE_X, top: BTN_FIRE_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
+            <Text style={styles.btnText}>FIRE</Text>
+          </View>
+          <View style={[styles.btn, styles.btnGas, { left: BTN_GAS_X, top: BTN_GAS_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
+            <Text style={styles.btnText}>GAS</Text>
+          </View>
+          <View style={[styles.btn, styles.btnBrake, { left: BTN_BRAKE_X, top: BTN_BRAKE_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
+            <Text style={styles.btnText}>BRAKE</Text>
+          </View>
         </View>
       </View>
 
