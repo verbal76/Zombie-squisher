@@ -31,7 +31,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
             return (
               <Pressable
                 key={v.id}
-                style={[styles.card, selected && styles.cardSelected, !owned && styles.cardLocked]}
+                style={[styles.card, selected && styles.cardSelected]}
                 onPress={() => {
                   if (owned) {
                     onChange({ ...progress, selectedVehicle: v.id });
@@ -51,6 +51,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
                   {owned && selected && <Text style={styles.selectedTag}>SELECTED</Text>}
                   {owned && !selected && <Text style={styles.tapTag}>tap to select</Text>}
                 </View>
+                {!owned && <Text style={styles.lockIcon}>🔒</Text>}
               </Pressable>
             );
           })}
@@ -65,7 +66,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
             return (
               <Pressable
                 key={stat}
-                style={[styles.upgRow, !can && !maxed && styles.cardLocked]}
+                style={styles.upgRow}
                 onPress={() => {
                   if (maxed) return;
                   const next = buyUpgrade(progress, progress.selectedVehicle, stat);
@@ -91,7 +92,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
             return (
               <Pressable
                 key={w.id}
-                style={[styles.card, selected && styles.cardSelected, !unlocked && styles.cardLocked]}
+                style={[styles.card, selected && styles.cardSelected]}
                 onPress={() => {
                   if (unlocked) {
                     onChange({
@@ -109,6 +110,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
                   {!unlocked && <Text style={styles.cost}>Unlocks at {w.unlockKills} total kills</Text>}
                   {unlocked && selected && <Text style={styles.selectedTag}>EQUIPPED</Text>}
                 </View>
+                {!unlocked && <Text style={styles.lockIcon}>🔒</Text>}
               </Pressable>
             );
           })}
@@ -121,7 +123,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
             return (
               <Pressable
                 key={s.id}
-                style={[styles.card, selected && styles.cardSelected, !unlocked && styles.cardLocked]}
+                style={[styles.card, selected && styles.cardSelected]}
                 onPress={() => {
                   if (unlocked) {
                     onChange({
@@ -139,6 +141,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
                   {!unlocked && <Text style={styles.cost}>Unlocks at {s.unlockKills} total kills</Text>}
                   {unlocked && selected && <Text style={styles.selectedTag}>EQUIPPED</Text>}
                 </View>
+                {!unlocked && <Text style={styles.lockIcon}>🔒</Text>}
               </Pressable>
             );
           })}
@@ -151,7 +154,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
             return (
               <Pressable
                 key={a.id}
-                style={[styles.card, selected && styles.cardSelected, !unlocked && styles.cardLocked]}
+                style={[styles.card, selected && styles.cardSelected]}
                 onPress={() => {
                   if (unlocked) {
                     onChange({
@@ -169,6 +172,7 @@ export function GarageScreen({ progress, onChange, onBack }: Props) {
                   {!unlocked && <Text style={styles.cost}>Unlocks at {a.unlockKills} total kills</Text>}
                   {unlocked && selected && <Text style={styles.selectedTag}>EQUIPPED</Text>}
                 </View>
+                {!unlocked && <Text style={styles.lockIcon}>🔒</Text>}
               </Pressable>
             );
           })}
@@ -198,7 +202,7 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#888', letterSpacing: 2, marginBottom: 8, fontWeight: '700' },
   card: { flexDirection: 'row', backgroundColor: '#1a1a1a', padding: 12, borderRadius: 10, marginBottom: 8, alignItems: 'center', gap: 12, borderWidth: 2, borderColor: 'transparent' },
   cardSelected: { borderColor: '#ffd24a' },
-  cardLocked: { opacity: 0.5 },
+  lockIcon: { fontSize: 22, color: '#e34a4a', marginLeft: 8, marginRight: 4 },
   swatch: { width: 36, height: 36, borderRadius: 6, borderWidth: 2, borderColor: '#000' },
   cardTitle: { color: '#fff', fontWeight: '800', fontSize: 16 },
   cardMeta: { color: '#888', fontSize: 12, marginTop: 2 },

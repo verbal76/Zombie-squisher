@@ -6,7 +6,7 @@ import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
 import { ZOMBIE_DEFS } from '../data/zombies';
 import { World, createWorld, step } from '../game/engine';
-import { SteeringWheel } from './SteeringWheel';
+import { Thumbstick } from './Thumbstick';
 import { AboutModal } from './AboutModal';
 
 interface Props {
@@ -21,7 +21,7 @@ const ZOMBIE_DEPTH = 16;
 const BOSS_DEPTH = 28;
 const CAR_LIFT = 1;
 
-const WHEEL_SIZE = 195;
+const WHEEL_SIZE = 170;
 const BTN_SIZE = 78;
 const BTN_GAP = 12;
 const MARGIN = 24;
@@ -188,7 +188,7 @@ export function GameScreen({ progress, onEnd }: Props) {
       </Pressable>
 
       <View style={{ position: 'absolute', left: MARGIN, bottom: MARGIN }}>
-        <SteeringWheel size={WHEEL_SIZE} onChange={(t) => (wheelRef.current = t)} />
+        <Thumbstick size={WHEEL_SIZE} onChange={(t) => (wheelRef.current = t)} />
       </View>
 
       <View
