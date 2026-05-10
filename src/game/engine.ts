@@ -37,7 +37,22 @@ export interface World {
   shake: number;
   gameOver: boolean;
   nextBossKills: number;
+  /** Current kill streak (resets on hit, on idle for 3s, or on slow contact). */
+  streak: number;
+  /** Best streak this run, for HUD display. */
+  bestStreak: number;
+  /** Seconds since last kill; used to time-out the streak. */
+  streakIdleTimer: number;
+  /** Active streak-milestone banner; consumed by the HUD when shown. */
+  streakBannerKind: StreakBannerKind;
+  /** performance.now() at which the banner was last triggered. */
+  streakBannerAt: number;
+  /** Smoothed normalized momentum 0..1 for HUD bar. */
+  momentum: number;
 }
+
+export type StreakBannerKind = 'spree' | 'reaper' | 'breaker' | 'apocalypse' | null;
+export const KILL_SPEED = 50;
 
 export interface DerivedStats {
   speed: number;
@@ -101,6 +116,12 @@ export function createWorld(width: number, height: number, p: Progress): World {
     shake: 0,
     gameOver: false,
     nextBossKills: 200,
+    streak: 0,
+    bestStreak: 0,
+    streakIdleTimer: 0,
+    streakBannerKind: null,
+    streakBannerAt: 0,
+    momentum: 0,
   };
 }
 
@@ -124,6 +145,12 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   if (world.abilityCooldown > 0) world.abilityCooldown = Math.max(0, world.abilityCooldown - dt * 1000);
   if (world.invuln > 0) world.invuln = Math.max(0, world.invuln - dt * 1000);
   if (world.shake > 0) world.shake = Math.max(0, world.shake - dt * 60);
+
+  // Streak times out after 3s of no kill.
+  if (world.streak > 0) {
+    world.streakIdleTimer += dt;
+    if (world.streakIdleTimer > 3.0) world.streak = 0;
+  }
 
   if (input.triggerAbility && world.abilityCooldown <= 0 && p.selectedAbility !== 'none') {
     const a = ABILITIES[p.selectedAbility];
@@ -230,6 +257,11 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   world.carY += world.carVy * dt;
 
   world.speed = world.forwardV;
+  // Smooth normalized momentum 0..1 for HUD readout (keeps bar from jittering).
+  const speedNow = Math.hypot(world.carVx, world.carVy);
+  const targetMomentum = Math.min(1, speedNow / Math.max(1, stats.speed));
+  const mLerp = 1 - Math.pow(0.1, dt);
+  world.momentum += (targetMomentum - world.momentum) * mLerp;
   const bumperBonus = isNitro ? 2 : 1;
 
   world.spawnTimer -= dt;
@@ -289,33 +321,57 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     y2: carBox.y2 - 10,
   };
 
+  // Decay per-zombie attack cooldowns (used for cluster damage).
+  for (const z of world.zombies) {
+    if (z.attackCooldown > 0) z.attackCooldown = Math.max(0, z.attackCooldown - dt);
+  }
+
+  const carSpeed = Math.hypot(world.carVx, world.carVy);
+  const isImpact = carSpeed >= KILL_SPEED;
+
   for (const z of world.zombies) {
     if (z.hp <= 0) continue;
     const def = ZOMBIE_DEFS[z.kind];
 
     if (z.x + z.size > carBox.x1 && z.x - z.size < carBox.x2 && z.y + z.size > carBox.y1 && z.y - z.size < carBox.y2) {
-      const dmg = stats.bumperDamage * bumperBonus;
-      z.hp -= dmg;
-      if (z.hp <= 0) {
-        world.kills += 1;
-        spawnBlood(world, z);
-        world.shake = Math.min(20, world.shake + 2);
-      }
-      if (!isShielded && world.invuln <= 0) {
-        world.hp -= def.contactDamage;
-        world.invuln = 180;
+      if (isImpact) {
+        // Real ram: damage scales with impact speed; zombie gets knockback impulse.
+        const speedScale = Math.max(1, Math.min(2, carSpeed / Math.max(1, stats.speed * 0.4)));
+        z.hp -= stats.bumperDamage * bumperBonus * speedScale;
+        const inv = 1 / Math.max(1, carSpeed);
+        const kb = 80 + speedScale * 40;
+        z.vx += (world.carVx * inv) * kb;
+        z.vy += (world.carVy * inv) * kb;
+        if (z.hp <= 0) {
+          world.shake = Math.min(24, world.shake + 2 + speedScale);
+          registerKill(world, z);
+        }
+        if (!isShielded && world.invuln <= 0) {
+          world.hp -= def.contactDamage * 0.4;
+          world.invuln = 120;
+        }
+      } else {
+        // Slow / stalled: zombie does NOT die. Pushes the car (drag) and damages it.
+        world.carVx *= Math.pow(0.4, dt);
+        world.carVy *= Math.pow(0.4, dt);
+        if (z.attackCooldown <= 0) {
+          if (!isShielded) world.hp -= def.contactDamage * 0.6;
+          z.attackCooldown = 0.5;
+          world.shake = Math.min(20, world.shake + 0.6);
+        }
+        world.streak = 0;
       }
       continue;
     }
 
     if (sideBoxL && hits(z, sideBoxL)) {
       z.hp -= sideMod.damage;
-      if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); }
+      if (z.hp <= 0) registerKill(world, z);
       continue;
     }
     if (sideBoxR && hits(z, sideBoxR)) {
       z.hp -= sideMod.damage;
-      if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); }
+      if (z.hp <= 0) registerKill(world, z);
     }
   }
 
@@ -328,7 +384,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
       if (dx * dx + dy * dy < (z.size + 4) * (z.size + 4)) {
         z.hp -= pr.damage;
         if (pr.kind !== 'laser') pr.life = -1;
-        if (z.hp <= 0) { world.kills += 1; spawnBlood(world, z); }
+        if (z.hp <= 0) registerKill(world, z);
         if (pr.kind !== 'laser') break;
       }
     }
@@ -349,6 +405,25 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
 function hits(z: Zombie, box: { x1: number; x2: number; y1: number; y2: number }): boolean {
   return z.x + z.size > box.x1 && z.x - z.size < box.x2 && z.y + z.size > box.y1 && z.y - z.size < box.y2;
+}
+
+function registerKill(world: World, z: Zombie): void {
+  world.kills += 1;
+  world.streak += 1;
+  if (world.streak > world.bestStreak) world.bestStreak = world.streak;
+  world.streakIdleTimer = 0;
+  spawnBlood(world, z);
+  if (world.streak >= 10) world.hp = Math.min(world.maxHp, world.hp + 0.3);
+  const prev = world.streak - 1;
+  let banner: StreakBannerKind = null;
+  if (prev < 100 && world.streak >= 100) banner = 'apocalypse';
+  else if (prev < 50 && world.streak >= 50) banner = 'breaker';
+  else if (prev < 25 && world.streak >= 25) banner = 'reaper';
+  else if (prev < 10 && world.streak >= 10) banner = 'spree';
+  if (banner) {
+    world.streakBannerKind = banner;
+    world.streakBannerAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  }
 }
 
 function spawnBlood(world: World, z: Zombie): void {
@@ -378,7 +453,7 @@ function spawnZombie(world: World, forceBoss: boolean): void {
   const vx = (dx / dist) * def.speed * 0.5;
   const vy = (dy / dist) * def.speed * 0.5;
   const hp = def.hp + world.wave * (kind === 'boss' ? 40 : 4);
-  const z: Zombie = { id: world.nextEntityId++, x, y, vx, vy, hp, maxHp: hp, kind, size: def.size };
+  const z: Zombie = { id: world.nextEntityId++, x, y, vx, vy, hp, maxHp: hp, kind, size: def.size, attackCooldown: 0 };
   world.zombies.push(z);
 }
 

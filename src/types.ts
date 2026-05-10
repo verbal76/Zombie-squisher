@@ -90,6 +90,8 @@ export interface Zombie extends Entity {
   kind: ZombieKind;
   size: number;
   maxHp: number;
+  /** Seconds until this zombie can next damage the car via cluster contact. */
+  attackCooldown: number;
 }
 
 export type ProjectileKind = 'mg' | 'flame' | 'rocket' | 'laser';

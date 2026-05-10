@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
-import { Canvas, useFrame, useThree } from '@react-three/fiber/native';
-import { Progress, Vehicle, Zombie, Projectile } from '../types';
+import { Animated, GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Canvas, useFrame } from '@react-three/fiber/native';
+import { Progress, Vehicle, Zombie, Projectile, BloodSpot } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
 import { ZOMBIE_DEFS } from '../data/zombies';
-import { World, createWorld, step } from '../game/engine';
+import { World, createWorld, step, KILL_SPEED, StreakBannerKind } from '../game/engine';
 import { Thumbstick, ThumbstickHandle } from './Thumbstick';
 import { AboutModal } from './AboutModal';
 import { getGrassTexture } from '../render/grassTexture';
@@ -194,6 +194,9 @@ export function GameScreen({ progress, onEnd }: Props) {
 
         <CarMesh world={w} vehicle={vehicle} />
 
+        {w.bloodSpots.map((b) => (
+          <BloodMesh key={b.id} blood={b} />
+        ))}
         {w.zombies.map((z) => (
           <ZombieMesh key={z.id} z={z} />
         ))}
@@ -210,9 +213,15 @@ export function GameScreen({ progress, onEnd }: Props) {
         <View style={styles.hpBar}>
           <View style={[styles.hpFill, { width: `${hpPct * 100}%` }]} />
         </View>
+        <MomentumBar world={w} vehicleMaxSpeed={vehicle.baseSpeed} />
+        {w.streak > 0 && (
+          <Text style={styles.streakText}>STREAK ×{w.streak}</Text>
+        )}
         <Text style={styles.dbg}>{dbgCar}</Text>
         <Text style={styles.dbg}>{dbgZ}</Text>
       </View>
+
+      <StreakBanner world={w} />
 
       <Pressable style={[styles.gear, { top: HUD_TOP - 2 }]} onPress={() => setAboutOpen(true)} hitSlop={8}>
         <Text style={styles.gearIcon}>⚙</Text>
@@ -316,10 +325,28 @@ function CameraTracker({ world }: { world: World }) {
     const lerp = 1 - Math.pow(0.001, dt);
     f.x += (targetX - f.x) * lerp;
     f.y += (targetY - f.y) * lerp;
-    state.camera.position.set(f.x + CAM_OFFSET_X, CAM_HEIGHT, f.y + CAM_OFFSET_Z);
+    // Shake: small random offset scaled by world.shake (kill / explosion impulse).
+    const sx = (Math.random() - 0.5) * world.shake * 3;
+    const sz = (Math.random() - 0.5) * world.shake * 3;
+    state.camera.position.set(f.x + CAM_OFFSET_X + sx, CAM_HEIGHT, f.y + CAM_OFFSET_Z + sz);
     state.camera.lookAt(f.x, 0, f.y);
   });
   return null;
+}
+
+function BloodMesh({ blood }: { blood: BloodSpot }) {
+  const meshRef = useRef<any>(null);
+  const matRef = useRef<any>(null);
+  useFrame(() => {
+    if (meshRef.current) meshRef.current.position.set(blood.x, 0.5, blood.y);
+    if (matRef.current) matRef.current.opacity = Math.max(0, blood.alpha);
+  });
+  return (
+    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
+      <circleGeometry args={[blood.size, 10]} />
+      <meshBasicMaterial ref={matRef} color={'#3a0a0a'} transparent opacity={blood.alpha} />
+    </mesh>
+  );
 }
 
 const CAR_VISUAL_SCALE = 1.2;
@@ -415,6 +442,58 @@ function projectileBoxStyle(kind: string) {
   }
 }
 
+function MomentumBar({ world, vehicleMaxSpeed }: { world: World; vehicleMaxSpeed: number }) {
+  // Smoothed momentum 0..1; tick mark at the kill threshold.
+  const fillPct = Math.max(0, Math.min(1, world.momentum)) * 100;
+  const tickPct = Math.max(0, Math.min(1, KILL_SPEED / Math.max(1, vehicleMaxSpeed))) * 100;
+  const inKillRange = world.momentum * vehicleMaxSpeed >= KILL_SPEED;
+  const fillColor = inKillRange ? '#3acb55' : '#e34a4a';
+  return (
+    <View style={styles.momentumWrap}>
+      <View style={[styles.momentumFill, { width: `${fillPct}%`, backgroundColor: fillColor }]} />
+      <View style={[styles.momentumTick, { left: `${tickPct}%` }]} />
+    </View>
+  );
+}
+
+const STREAK_LABELS: Record<Exclude<StreakBannerKind, null>, string> = {
+  spree: 'KILLING SPREE',
+  reaper: 'ROAD REAPER',
+  breaker: 'HORDE BREAKER',
+  apocalypse: 'APOCALYPSE ENGINE',
+};
+
+function StreakBanner({ world }: { world: World }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const [visibleKind, setVisibleKind] = useState<StreakBannerKind>(null);
+  const lastAt = useRef(0);
+
+  useEffect(() => {
+    if (world.streakBannerKind && world.streakBannerAt !== lastAt.current) {
+      lastAt.current = world.streakBannerAt;
+      setVisibleKind(world.streakBannerKind);
+      opacity.stopAnimation();
+      opacity.setValue(0);
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+        Animated.delay(900),
+        Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
+      ]).start(() => {
+        setVisibleKind(null);
+        // Clear the trigger so a future identical kind can re-fire.
+        world.streakBannerKind = null;
+      });
+    }
+  });
+
+  if (!visibleKind) return null;
+  return (
+    <Animated.View pointerEvents="none" style={[styles.streakBanner, { opacity }]}>
+      <Text style={styles.streakBannerText}>{STREAK_LABELS[visibleKind]}</Text>
+    </Animated.View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0a' },
   hud: { position: 'absolute' },
@@ -436,4 +515,10 @@ const styles = StyleSheet.create({
   abilityText: { color: '#ffd24a', fontWeight: '800', letterSpacing: 1 },
   abilityCdBar: { marginTop: 6, height: 4, width: 90, backgroundColor: '#333', borderRadius: 2, overflow: 'hidden' },
   abilityCdFill: { height: '100%', backgroundColor: '#ffd24a' },
+  momentumWrap: { marginTop: 6, height: 6, backgroundColor: '#1a1a1a', borderRadius: 3, overflow: 'hidden', position: 'relative' },
+  momentumFill: { height: '100%' },
+  momentumTick: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: '#ffd24a' },
+  streakText: { color: '#ffd24a', fontWeight: '900', fontSize: 14, marginTop: 4, letterSpacing: 1 },
+  streakBanner: { position: 'absolute', top: '32%', left: 0, right: 0, alignItems: 'center', zIndex: 20 },
+  streakBannerText: { color: '#ffd24a', fontWeight: '900', fontSize: 32, letterSpacing: 3, textShadowColor: '#000', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 4 },
 });
