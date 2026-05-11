@@ -493,6 +493,82 @@ workflow steps don't fail:
 "prepare-assets": "echo 'no asset prep'"
 ```
 
+### 2.8 `.github/workflows/prune-artifacts.yml` — storage-quota safeguard
+
+GitHub Actions enforces a fixed artifact storage quota per account. Once
+hit, every subsequent upload step fails. This workflow keeps the repo
+permanently under quota by deleting all but the 3 newest artifacts.
+
+```yaml
+name: Prune Artifacts
+# Keep only the 3 most recent artifacts repo-wide so we stay under the
+# storage quota. Runs daily, manually, and after every build completes.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_run:
+    workflows: ['Android APK (GitHub Runner)']
+    types: [completed]
+
+permissions:
+  actions: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all but the 3 newest artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const KEEP = 3;
+            const { owner, repo } = context.repo;
+            const all = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              { owner, repo, per_page: 100 }
+            );
+            const sorted = all.sort(
+              (a, b) => new Date(b.created_at) - new Date(a.created_at)
+            );
+            const toDelete = sorted.slice(KEEP);
+            core.info(`Found ${sorted.length} artifacts; keeping ${Math.min(KEEP, sorted.length)}, deleting ${toDelete.length}.`);
+            for (const a of toDelete) {
+              core.info(`Deleting ${a.name} (id=${a.id}, created=${a.created_at})`);
+              await github.rest.actions.deleteArtifact({
+                owner, repo, artifact_id: a.id,
+              });
+            }
+```
+
+Three triggers, three roles:
+
+- `workflow_dispatch` — manual sweep button in the Actions UI. Used once
+  per repo right after the workflow lands, to drain whatever backlog has
+  already accumulated.
+- `schedule: cron '0 6 * * *'` — daily safety net at 06:00 UTC, catches
+  anything missed by the chained trigger.
+- `workflow_run` — fires the instant the build workflow completes, so
+  pruning happens in real time as new artifacts appear.
+
+`KEEP = 3` is the only behavioral knob. Bump it to 5 or 10 if you want
+more history; the script handles any positive integer.
+
+Uses `actions/github-script@v7` with the job's built-in `GITHUB_TOKEN`.
+No PAT, no extra secret. The `permissions: actions: write` block is the
+only authorization needed; without it the delete call returns 403.
+
+Two adjustments per project:
+
+1. `workflows: ['Android APK (GitHub Runner)']` — replace the string in
+   the array with the exact `name:` from your build workflow's first
+   line (case-sensitive). If the project has no chainable build workflow,
+   delete the entire `workflow_run:` block — cron + manual still cover
+   you, just on a 24-hour rhythm instead of real-time.
+2. Multiple build workflows can be chained by listing them all:
+   `workflows: ['CI', 'Release Build']`.
+
 ---
 
 ## 3. Loading binary assets in your app
@@ -703,10 +779,11 @@ branch shipped them. Branch-per-channel keeps testing isolated:
 
 ## 10. Summary
 
-The pipeline ships in 7 files plus the EAS setup steps:
+The pipeline ships in 8 files plus the EAS setup steps:
 
 - `.github/workflows/android-build.yml`
 - `.github/workflows/eas-update.yml`
+- `.github/workflows/prune-artifacts.yml`
 - `app.json`
 - `eas.json`
 - `metro.config.js`
@@ -715,3 +792,107 @@ The pipeline ships in 7 files plus the EAS setup steps:
 
 Total setup time on a new repo, once the operator has done the EAS account
 work and obtained an Android signing key, is approximately 30 minutes.
+
+---
+
+## 11. Per-repo rollout to additional projects
+
+Use this section when adding the prune-artifacts workflow (or any other
+piece of the pipeline) to a new repository in the same fleet. The steps
+are straightforward but contain non-obvious gotchas worth surfacing.
+
+### 11.1 Find the default branch — do not assume `main`
+
+GitHub workflows are only honored on the default branch (see 11.4). The
+default branch can be anything: `main`, `master`, `develop`, or in some
+projects the de-facto-main branch itself if no separate workflow-only
+branch was ever set up. Three discovery routes:
+
+- **Web**: open `github.com/<owner>/<repo>` and read whichever branch the
+  dropdown shows — that's the default.
+- **Local terminal**: `git remote show origin` and look for the
+  `HEAD branch:` line.
+- **API / agent**: read repo metadata; the `default_branch` field is
+  returned by the standard repo-info endpoint
+  (`GET /repos/{owner}/{repo}`).
+
+If the default branch is also where active work lives, that's fine — one
+push to it covers both roles.
+
+### 11.2 Find the build workflow's exact `name:`
+
+Look in `.github/workflows/` on the default branch for whichever file
+builds the APK (`./gradlew assembleDebug`, `eas build`, or similar). Open
+it. The very first line is `name: <something>`. Copy that string
+verbatim, case-sensitive. Examples seen in the fleet:
+
+- `Android APK (GitHub Runner)` — repos on the local-build pipeline
+  (this template)
+- `EAS Build (Android APK)` — repos still on EAS-cloud builds
+- `CI`, `Build APK`, `Release` — ad-hoc setups
+
+If the repo has no relevant build workflow at all, see 11.3.
+
+### 11.3 Decision logic for the `workflow_run` block
+
+- **Has a build workflow worth chaining off** → put the exact name from
+  11.2 into the `workflows:` array.
+- **Has no build workflow** OR **don't want real-time chaining** →
+  delete the entire `workflow_run:` block (three lines). The
+  `schedule:` cron + `workflow_dispatch:` manual trigger still work
+  fine; you just lose the post-build immediate prune.
+- **Has multiple chainable build workflows** → list them all:
+  `workflows: ['CI', 'Release Build']`.
+
+### 11.4 Critical — the file MUST live on the default branch
+
+GitHub reads workflow definitions for `schedule:`, `workflow_run:`, and
+the Actions-UI **Run workflow** button **only from the default branch**.
+Push the file to a feature branch and:
+
+- The workflow's URL 404s.
+- `schedule:` and `workflow_run:` triggers silently never fire.
+- The **Run workflow** button doesn't appear in the Actions UI.
+
+If the repo's default branch isn't where day-to-day code work lives,
+that's fine — workflows belong on the default branch by convention. Just
+target it explicitly:
+
+```
+mcp__github__push_files({
+  owner, repo,
+  branch: "<default_branch from 11.1>",
+  ...
+})
+```
+
+### 11.5 One-time activation
+
+After the push, `schedule:` and `workflow_run:` only fire on **future**
+events. To clear an already-overfull repo immediately:
+
+1. Go to `github.com/<owner>/<repo>/actions/workflows/prune-artifacts.yml`
+2. Click **Run workflow** dropdown → **Run workflow** button.
+3. Watch the run log; expect output like
+   `Found 27 artifacts; keeping 3, deleting 24.` followed by a delete
+   line per artifact.
+
+From then on, the cron + chain triggers maintain it. No further
+intervention needed.
+
+### 11.6 Abbreviated brief for an in-repo Claude instance
+
+Hand this to a Claude in each target repo:
+
+> Add `prune-artifacts.yml` to this repo. Steps:
+> 1. Determine the default branch via repo metadata (do not assume
+>    `main`).
+> 2. Find the APK/build workflow file under `.github/workflows/` on the
+>    default branch and read its `name:` line exactly.
+> 3. Use `mcp__github__create_or_update_file` (or `push_files`) to push
+>    `prune-artifacts.yml` to the **default branch** with the workflow
+>    name substituted into `workflows: [...]`. If there's no build
+>    workflow worth chaining, delete the entire `workflow_run:` block.
+> 4. Tell the user to fire it once from the Actions tab
+>    (**Run workflow**) to drain the initial backlog. From then on it
+>    self-maintains.
