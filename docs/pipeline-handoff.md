@@ -1,34 +1,31 @@
-# Game Pipeline Handoff: OTA + APK via GitHub Actions
+# Mobile App Pipeline: OTA + APK via GitHub Actions
 
-This document teaches a Claude instance in a new game project how to replicate
-the deployment workflow used in `zombie-squisher`. It covers the core
-architecture, every file you need to create, and the gotchas that took us
-several iterations to learn.
-
-The pipeline lets you ship two kinds of updates from a single git push:
+This is the standard deployment pipeline for any Expo / React Native project
+that ships to Android via GitHub Actions. It supports two release channels
+out of the same git branch:
 
 - **OTA (Over-the-Air) update** — JS/TS-only changes, lands on user devices
   within seconds via Expo Updates. No app store, no APK install.
 - **APK build** — full native rebuild via EAS Build on a GitHub runner.
-  Required whenever native code, assets, or build config changes.
+  Required whenever native code, bundled assets, or build config changes.
 
-The trick is letting `paths-ignore` filters route each push to the correct
-workflow automatically.
+A single `paths-ignore` filter on each workflow routes every push to the
+correct lane automatically.
 
 ---
 
 ## 1. Mental model — when does each path fire?
 
-There are two GitHub Actions workflows watching the same branch. Their
-`paths-ignore` lists are mirror images:
+Two GitHub Actions workflows watch the same branch. Their `paths-ignore`
+lists are mirror images:
 
 | What changed                                    | OTA fires? | APK fires? |
 |-------------------------------------------------|------------|------------|
-| `src/**` (TypeScript / React components)         | YES        | no         |
-| `assets/**` (GLBs, PNGs, audio)                  | YES        | YES        |
-| `package.json`, `app.json`, `eas.json`           | no         | YES        |
-| `metro.config.js`, `babel.config.js`             | no         | YES        |
-| `.github/**`, `**/*.md`, `scripts/**`            | no         | no         |
+| `src/**` (TypeScript / React components)        | YES        | no         |
+| `assets/**` (binary assets bundled into the app)| YES        | YES        |
+| `package.json`, `app.json`, `eas.json`          | no         | YES        |
+| `metro.config.js`, `babel.config.js`            | no         | YES        |
+| `.github/**`, `**/*.md`, `scripts/**`           | no         | no         |
 
 Why this split:
 
@@ -36,17 +33,17 @@ Why this split:
   binary. Routing them away from OTA prevents broken updates.
 - **JS-only changes don't need a 10-minute APK rebuild** — they fly through
   OTA in ~30 seconds.
-- **Assets bundled into the APK** need both: APK rebuild for binary inclusion
-  AND OTA so devices on the new APK get any subsequent JS code that
-  references them. (In practice you push the asset commit, the APK build
-  triggers, and the JS that uses them follows in the next src/** commit
-  which OTAs to the new APK.)
-- **Docs / CI / scripts** should fire neither workflow. They don't ship to
-  users.
+- **Bundled assets** need both: APK rebuild for binary inclusion, then the
+  next `src/**` commit OTAs the JS that consumes them.
+- **Docs / CI configs / build scripts** should fire neither workflow. They
+  don't ship to users.
 
 The single most important rule:
 
-> **Never bump `expo.version` in `app.json`.** Use `runtimeVersion: { policy: "appVersion" }`. If `appVersion` changes, OTAs stop reaching old installs because the runtime no longer matches.
+> **Never bump `expo.version` in `app.json` without also publishing a new
+> APK.** Use `runtimeVersion: { policy: "appVersion" }`. If `appVersion`
+> changes, OTAs stop reaching old installs because the runtime no longer
+> matches.
 
 ---
 
@@ -63,7 +60,7 @@ on:
       - 'main'        # <-- replace with your working branch name
     paths-ignore:
       - 'src/**'
-      - 'agentic docs/**'
+      - 'docs/**'
       - '**/*.md'
       - '.github/**'
       - 'scripts/**'
@@ -87,7 +84,7 @@ jobs:
     permissions:
       contents: write
     env:
-      EXPO_TOKEN: ${{ secrets.EAS_TOKEN }}   # <-- rename secret as you like
+      EXPO_TOKEN: ${{ secrets.EAS_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -118,7 +115,7 @@ jobs:
       - name: Generate build info
         run: node scripts/write-build-info.mjs
 
-      - name: Prepare icon assets
+      - name: Prepare assets
         run: npm run prepare-assets
 
       - name: Determine profile
@@ -167,11 +164,11 @@ Key design points:
 
 - `eas build --local` builds the APK on the GitHub runner itself, not on
   EAS cloud. Free for public repos. Avoids EAS Build queue waits.
-- `github.run_number` becomes the build number in release tags (`apk-build-52`),
-  so users can tell what they're running.
+- `github.run_number` becomes the build number in release tags
+  (`apk-build-52`), so users can identify what they're running.
 - Tag pushes (`v1.0.0`) flip to production AAB for Play Store submission.
-- The Release publishes a downloadable APK on the repo's Releases page —
-  handy for internal testers.
+- The Release step publishes a downloadable APK on the repo's Releases page
+  for internal testers, QA, and rollback.
 
 ### 2.2 `.github/workflows/eas-update.yml` — the OTA pusher
 
@@ -192,7 +189,7 @@ on:
       - 'tsconfig.json'
       - '.github/**'
       - '**/*.md'
-      - 'agentic docs/**'
+      - 'docs/**'
       - 'scripts/**'
   workflow_dispatch:
     inputs:
@@ -236,7 +233,7 @@ jobs:
       - name: Generate build info
         run: node scripts/write-build-info.mjs
 
-      - name: Prepare icon assets
+      - name: Prepare assets
         run: npm run prepare-assets
 
       - name: Publish update
@@ -251,21 +248,22 @@ jobs:
           eas update --non-interactive --branch "$BRANCH" --message "$MSG"
 ```
 
-`cancel-in-progress: true` matters here — OTAs are cheap, and if you push
-twice in 30 seconds you want the second push to win, not queue up.
+`cancel-in-progress: true` is intentional. OTAs are cheap and idempotent —
+if a developer pushes twice in 30 seconds, the second push should win and
+the first run should die.
 
 ### 2.3 `app.json` — the runtime version contract
 
 ```json
 {
   "expo": {
-    "name": "YourGame",
-    "slug": "your-game-slug",
+    "name": "YourApp",
+    "slug": "your-app-slug",
     "owner": "your-eas-account",
     "version": "1.0.0",
     "orientation": "default",
     "userInterfaceStyle": "dark",
-    "scheme": "yourgame",
+    "scheme": "yourapp",
     "newArchEnabled": false,
     "runtimeVersion": {
       "policy": "appVersion"
@@ -281,10 +279,10 @@ twice in 30 seconds you want the second push to win, not queue up.
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourorg.yourgame"
+      "bundleIdentifier": "com.yourorg.yourapp"
     },
     "android": {
-      "package": "com.yourorg.yourgame",
+      "package": "com.yourorg.yourapp",
       "adaptiveIcon": {
         "backgroundColor": "#0a0a0a"
       }
@@ -315,12 +313,12 @@ twice in 30 seconds you want the second push to win, not queue up.
 Critical fields:
 
 - `runtimeVersion.policy = "appVersion"` ties OTAs to the value of
-  `expo.version`. **Do not bump `expo.version` unless you also publish a new
-  APK** — old installs will stop receiving updates.
-- `updates.url` and `extra.eas.projectId` are project-specific and come from
-  `eas init`.
-- `checkAutomatically: "ON_LOAD"` polls for OTAs every cold start. This is
-  what makes your code changes appear within seconds.
+  `expo.version`. **Do not bump `expo.version` unless you also publish a
+  new APK** — old installs will stop receiving updates.
+- `updates.url` and `extra.eas.projectId` are project-specific and come
+  from `eas init`.
+- `checkAutomatically: "ON_LOAD"` polls for OTAs on every cold start —
+  this is what makes code changes appear within seconds of a push.
 
 ### 2.4 `eas.json` — build profiles
 
@@ -357,15 +355,16 @@ Critical fields:
 }
 ```
 
-The `channel` keys must match the OTA channel names you use in
-`eas update --branch <channel>`. Devices on a `preview` APK only receive
-OTAs published to the `preview` channel.
+The `channel` keys must match the OTA channel names used in
+`eas update --branch <channel>`. Devices running a `preview` APK only
+receive OTAs published to the `preview` channel.
 
 ### 2.5 `scripts/write-build-info.mjs` — build identification
 
-Without this, you can't tell what version is running on a user's phone.
-This script runs in both workflows and writes a generated TS file that the
-About modal in your app reads.
+Without this script, you cannot tell what version is running on a user's
+phone. It runs in both workflows and writes a generated TypeScript file
+that the app reads at runtime, typically surfaced in an About / Debug
+modal.
 
 ```javascript
 import { execSync } from 'node:child_process';
@@ -414,8 +413,8 @@ writeFileSync(OUTPUT,
 console.log(`write-build-info: ${branch}@${commitShort}${dirty ? ' (dirty)' : ''}`);
 ```
 
-Then `src/__generated__/build-info.ts` (gitignored, generated each build)
-can be imported anywhere:
+Then `src/__generated__/build-info.ts` (gitignored, regenerated on each
+build) can be imported anywhere:
 
 ```ts
 import { BUILD_INFO } from './__generated__/build-info';
@@ -423,31 +422,35 @@ import { BUILD_INFO } from './__generated__/build-info';
 // BUILD_INFO.buildId     -> "build 1cff040 (main)"
 ```
 
-Wire it into a debug/about modal so you can verify which commit is live.
+Surface it in a debug or About modal so testers and developers can confirm
+which commit is live.
 
-Add to your `.gitignore`:
+Add to `.gitignore`:
 
 ```
 src/__generated__/
 ```
 
-### 2.6 `metro.config.js` — binary assets
+### 2.6 `metro.config.js` — binary assets and ESM resolution
 
-If your game uses GLBs (3D models), GLTFs, audio, or any non-image binary,
-Metro needs explicit permission to bundle them. Without this, `require()`ing
-a `.glb` will silently return `undefined` and fail at runtime.
+If the project loads binary assets that aren't images (3D models, audio,
+video, fonts beyond the defaults, custom file formats), Metro needs
+explicit permission to bundle them. Without it, `require()`ing the file
+silently returns `undefined` and fails at runtime.
 
 ```javascript
 const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
-// Enable package.json `exports` field resolution. Required for modern
-// ESM-only deps like three.js 0.150+ which @react-three/fiber pulls in.
+// Enable package.json `exports` field resolution. Required for ESM-only
+// npm packages (modern Three.js, some chart libraries, etc.). Without it,
+// deep submodule imports fail to resolve.
 config.resolver.unstable_enablePackageExports = true;
 
-// Whitelist binary asset types Metro should bundle.
-for (const ext of ['glb', 'gltf', 'mp3', 'wav', 'ogg']) {
+// Whitelist binary asset extensions Metro should bundle. Extend this list
+// for whatever file types your project consumes.
+for (const ext of ['glb', 'gltf', 'mp3', 'wav', 'ogg', 'mp4']) {
   if (!config.resolver.assetExts.includes(ext)) {
     config.resolver.assetExts.push(ext);
   }
@@ -456,13 +459,13 @@ for (const ext of ['glb', 'gltf', 'mp3', 'wav', 'ogg']) {
 module.exports = config;
 ```
 
-Two critical pieces:
+Two pieces both matter:
 
 - `unstable_enablePackageExports = true` — required for ESM-only npm
-  packages (three.js, etc.). Without it, deep imports like
-  `three/examples/jsm/loaders/GLTFLoader.js` fail.
-- The `assetExts` push tells Metro to treat `.glb` as a bundled asset
-  rather than trying to parse it as JavaScript.
+  packages. Without it, deep imports like
+  `library/dist/some-submodule.js` fail.
+- The `assetExts` push tells Metro to treat the listed extensions as
+  bundled assets rather than trying to parse them as JavaScript.
 
 ### 2.7 `package.json` — required scripts
 
@@ -472,22 +475,31 @@ Two critical pieces:
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "prepare-assets": "node scripts/make-icon.mjs",
+    "prepare-assets": "node scripts/prepare-assets.mjs",
     "build-info": "node scripts/write-build-info.mjs"
   }
 }
 ```
 
-The `prepare-assets` step is project-specific. In `zombie-squisher` it
-generates app icons from a single source PNG. Make sure both workflows run
-it before the build/update step.
+The `prepare-assets` script is project-specific. A common job is generating
+launcher icons from a single source PNG, but the slot is generic — use it
+for any pre-build asset transformation step. Both workflows invoke it
+before the build/update step.
+
+If your project has no asset prep work, define it as a no-op so the
+workflow steps don't fail:
+
+```json
+"prepare-assets": "echo 'no asset prep'"
+```
 
 ---
 
 ## 3. Loading binary assets in your app
 
-This bit the project hard. **`fetch()` of `file://` URIs is unreliable on
-Android.** It returns an empty body, hangs, or both. The fix is to read via
+This bites every project that loads non-image binaries at runtime.
+**`fetch()` of `file://` URIs is unreliable on Android.** It returns an
+empty body, hangs indefinitely, or both. The fix is to read via
 `expo-file-system` and decode base64 to ArrayBuffer manually.
 
 ```ts
@@ -512,41 +524,42 @@ async function readBinaryAsset(mod: number): Promise<ArrayBuffer> {
 }
 
 // Usage:
-const buffer = await readBinaryAsset(require('../../assets/model.glb'));
+const buffer = await readBinaryAsset(require('../../assets/file.bin'));
 ```
 
-`atob` is a Hermes global in modern Expo (52+). If you target an older
-runtime, you'll need to polyfill via the `base-64` npm package.
+`atob` is a Hermes global in modern Expo (52+). For older runtimes,
+polyfill via the `base-64` npm package.
 
-For PNG textures use `THREE.TextureLoader().load(uri)` directly with the
-asset URI — that codepath uses `Image` which works fine on Android.
+For image textures use `Image` or the framework's image loader directly
+with the asset URI — that codepath is reliable on Android.
 
 ---
 
-## 4. Pushing commits as Claude — the proxy problem
+## 4. Pushing commits — the proxy author problem
 
-The session typically runs with a local git proxy that **rejects commits
-authored by anyone other than the session owner**. A `git push` from a
-Claude-authored commit returns:
+When this pipeline is operated by an AI assistant or any non-human agent,
+the local git proxy typically **rejects commits whose author is not the
+session owner**. A `git push` from an unauthorized author returns:
 
 ```
 RPC failed; HTTP 403 curl 22 The requested URL returned error: 403
 send-pack: unexpected disconnect while reading sideband packet
 ```
 
-You have two reliable routes around this:
+Two reliable routes around this:
 
-### 4.1 `mcp__github__push_files` for text-only changes
+### 4.1 GitHub MCP `push_files` for text-only changes
 
-This MCP tool commits via the GitHub REST API as the session owner. Use it
-for any change that's purely text — TS, TSX, JSON, YAML, MD.
+This MCP tool commits via the GitHub REST API as the authenticated user.
+Use it for any change that's purely text — TS, TSX, JS, JSON, YAML, MD,
+CSS, HTML.
 
 ```
 mcp__github__push_files({
-  owner: "verbal76",
-  repo: "your-game-slug",
+  owner: "<github-org-or-user>",
+  repo: "<repo-name>",
   branch: "main",
-  message: "Short commit message\n\nLonger body explaining why.",
+  message: "Short commit subject\n\nLonger body explaining why.",
   files: [
     { path: "src/file.ts", content: "<full file contents as a string>" },
     { path: "src/other.tsx", content: "..." }
@@ -561,18 +574,20 @@ git fetch origin main
 git reset --hard origin/main
 ```
 
-This discards your local commit (the rejected one) and adopts the remote's
-new commit (the MCP one). Local SHA now matches remote SHA.
+This discards the locally-rejected commit and adopts the remote's MCP
+commit. Local SHA now matches remote SHA.
 
 ### 4.2 Binary files
 
-The MCP tool can transmit text. **Binary GLBs, PNGs, audio cannot be
-chunked through it reliably** — output token budgets clip the base64
-payload mid-stream. Have the user upload binaries via the GitHub web UI
-("Add file" → "Upload files") and just `git pull` to pick them up.
+The MCP `push_files` tool transmits text. **Binary files of any
+appreciable size cannot be chunked through it reliably** — output token
+budgets clip the base64 payload mid-stream and the file lands corrupt.
 
-Empty placeholder folders that GitHub web UI sometimes creates (1-byte files
-named after the directory) need to be cleaned up with:
+For binaries, ask the operator to upload them via the GitHub web UI
+("Add file" → "Upload files") and then `git pull` to pick them up.
+
+Empty placeholder folders that the GitHub web UI sometimes creates
+(1-byte files named after the directory) need to be cleaned up:
 
 ```
 mcp__github__delete_file({
@@ -586,26 +601,25 @@ mcp__github__delete_file({
 
 ## 5. Standard workflow for a code change
 
-The full loop the user expects:
+The full loop:
 
-1. **Make your edits** locally with the `Edit`/`Write` tools.
-2. **Decide OTA or APK** by looking at which files you touched:
-   - `src/**` only → OTA (will auto-trigger on push)
+1. **Make your edits** with whatever tooling the agent has access to.
+2. **Decide OTA vs APK** by looking at which files changed:
+   - `src/**` only → OTA (auto-triggers on push)
    - `assets/**`, `metro.config.js`, `package.json`, etc. → APK
 3. **Commit locally** with a clear message.
-4. **Attempt `git push`**. If it 403s (which it will, for Claude commits),
-   fall back to `mcp__github__push_files` with the same files and message.
-5. **Sync local to remote**: `git fetch && git reset --hard origin/<branch>`.
-6. **Tell the user**: "Shipped as OTA for build #N" or "Triggered APK
-   build #N+1". Look at the latest release via
-   `mcp__github__get_latest_release` if you need the actual run number.
+4. **Attempt `git push`.** If it 403s, fall back to
+   `mcp__github__push_files` with the same files and message.
+5. **Sync local to remote:** `git fetch && git reset --hard origin/<branch>`.
+6. **Report to operator:** "Shipped as OTA for build #N" or "Triggered APK
+   build #N+1". Use `mcp__github__get_latest_release` if you need the
+   actual run number.
 
-When in doubt about which workflow fires, search the workflow file's
-`paths-ignore` list and apply the rule:
+When in doubt about which workflow fires, apply the rule:
 
-> If every changed file matches an entry in OTA's paths-ignore, OTA skips.
-> If every changed file matches an entry in APK's paths-ignore, APK skips.
-> Most src/** changes trigger OTA only; most config/asset changes trigger
+> If every changed file matches an entry in OTA's `paths-ignore`, OTA skips.
+> If every changed file matches an entry in APK's `paths-ignore`, APK skips.
+> Most `src/**` changes fire OTA only; most config and asset changes fire
 > APK only; some changes (rare) fire both, which is fine.
 
 ---
@@ -614,67 +628,90 @@ When in doubt about which workflow fires, search the workflow file's
 
 | Symptom                                          | Cause                                          | Fix                                                          |
 |--------------------------------------------------|-----------------------------------------------|--------------------------------------------------------------|
-| OTAs stop reaching old APK installs              | `expo.version` bumped without new APK         | Revert version bump or publish a new APK with the new version |
+| OTAs stop reaching old APK installs              | `expo.version` bumped without new APK         | Revert the version bump or publish a new APK at the new version |
 | Push returns 403 from local proxy                | Commit author isn't session owner             | Use `mcp__github__push_files` for text; web UI for binaries  |
-| 3D model renders as fallback box on Android only | `fetch()` on `file://` URI hangs              | Switch to `expo-file-system.readAsStringAsync` + atob        |
-| `require('./asset.glb')` returns undefined       | Metro not bundling that extension              | Add ext to `config.resolver.assetExts` in metro.config.js    |
-| `three/examples/jsm/...` import fails            | ESM exports not resolved                       | `config.resolver.unstable_enablePackageExports = true`       |
-| OTA workflow doesn't fire on a src/** push       | `src/**` accidentally in OTA's paths-ignore   | Remove it; keep it only in APK workflow's paths-ignore       |
-| APK build runs on every doc tweak                | `**/*.md` missing from APK workflow's ignore  | Add it to `paths-ignore`                                     |
-| About modal shows "unknown" build hash           | `scripts/write-build-info.mjs` not run        | Add the step to both workflows before `eas build`/`update`   |
+| Binary asset returns empty on Android only       | `fetch()` on `file://` URI hangs              | Switch to `expo-file-system.readAsStringAsync` + `atob`       |
+| `require('./file.glb')` returns undefined        | Metro not bundling that extension              | Add ext to `config.resolver.assetExts` in `metro.config.js`  |
+| ESM submodule import fails at bundle time        | `exports` field not resolved                   | `config.resolver.unstable_enablePackageExports = true`       |
+| OTA workflow doesn't fire on `src/**` push       | `src/**` accidentally in OTA's `paths-ignore` | Remove it; keep it only in APK workflow's `paths-ignore`     |
+| APK build fires on every doc tweak               | `**/*.md` missing from APK workflow's ignore  | Add it to `paths-ignore`                                     |
+| Build info shows "unknown" commit hash           | `scripts/write-build-info.mjs` not run         | Add the step to both workflows before `eas build` / `update` |
+| EAS auth fails in CI                             | `EXPO_TOKEN` secret not set                    | Add `EAS_TOKEN` (or your chosen name) to repo Actions secrets |
 
 ---
 
-## 7. Quick verification checklist for a new project
+## 7. Verification checklist for a new project
 
-After setting up everything above, smoke-test like this:
+After completing the setup above, smoke-test the pipeline in this order:
 
-1. Push an MD file change. **Neither workflow should fire.**
-2. Push a comment-only change in a `src/**` file. **OTA fires, APK does not.**
+1. Push an `.md` file change. **Neither workflow should fire.**
+2. Push a comment-only change to a `src/**` file. **OTA fires, APK does not.**
 3. Push a `metro.config.js` whitespace change. **APK fires, OTA does not.**
-4. Install the resulting APK, open the About modal, confirm the commit hash
-   matches the push that triggered it.
-5. Push another `src/**` change. Wait 30 seconds, force-close and reopen the
-   app. About modal's "OTA" line should update to the newer commit while
-   "Build" stays on the APK commit.
+4. Install the resulting APK on a test device. Open the build-info / About
+   surface and confirm the commit hash matches the push that triggered it.
+5. Push another `src/**` change. Wait ~30 seconds, force-close and reopen
+   the app. The OTA commit hash should update; the APK commit hash should
+   stay on the previous build.
 
-If all five pass, the pipeline is live.
+If all five pass, the pipeline is live and the contract is verified.
 
 ---
 
 ## 8. EAS account setup (one-time, manual)
 
-This part can't be scripted by Claude — the user needs to do it once:
+This section requires the operator's hands — it cannot be scripted by an
+agent:
 
 1. `npm install -g eas-cli`
 2. `eas login`
-3. `eas init` in the repo root — generates the `projectId` for `app.json`
-4. `eas update:configure` — wires up `updates.url`
-5. In GitHub repo settings → Secrets → Actions, add `EAS_TOKEN` with a
+3. `eas init` in the repo root — generates the `projectId` for `app.json`.
+4. `eas update:configure` — wires up `updates.url`.
+5. In the GitHub repo settings → Secrets → Actions, add `EAS_TOKEN` with a
    token from `eas account:tokens:create` (or use an Expo personal access
    token).
-6. Confirm the EAS dashboard shows your project at
+6. Confirm the EAS dashboard shows the project at
    `https://expo.dev/accounts/<owner>/projects/<slug>`.
 
-Once this is done, the workflows above run end-to-end without any further
+Once these steps are done, the workflows run end-to-end without further
 manual intervention.
 
 ---
 
-## 9. Branch naming
+## 9. Branch naming and channel alignment
 
-In this project the working branch is `Github-build-pipeline-zombie-crusher`.
-For a new project pick something short and stable — `main`, `develop`, or
-`release/<game-name>`. Whatever you choose, update both workflow files'
-`branches:` lists and the `write-build-info.mjs` fallback (it reads the
-current branch from git and displays it in the About modal).
+Pick a single working branch — `main`, `develop`, `release/<name>`, or
+similar — and put its name in three places:
 
-Don't run the pipeline on multiple parallel branches unless you also create
-separate EAS channels per branch — OTAs published to `preview` will land on
-every APK built against the `preview` channel regardless of which branch
-shipped them.
+- `branches:` list in `android-build.yml`
+- `branches:` list in `eas-update.yml`
+- The fallback in `write-build-info.mjs` reads the current branch from git
+  and surfaces it; the script doesn't need editing, but verify the
+  displayed branch matches expectations after a build.
+
+If you need parallel development on multiple branches, **also create
+parallel EAS channels per branch**. OTAs published to the `preview`
+channel land on every APK built against `preview` regardless of which
+branch shipped them. Branch-per-channel keeps testing isolated:
+
+| Branch        | EAS channel | Used for             |
+|---------------|-------------|----------------------|
+| `main`        | `production` | Play Store releases  |
+| `develop`     | `preview`   | Internal testers     |
+| `feature/*`   | `development` | Local dev builds   |
 
 ---
 
-That's the whole pipeline. Total setup time on a new repo, once you have
-the EAS account and an Android keystore, is about 30 minutes.
+## 10. Summary
+
+The pipeline ships in 7 files plus the EAS setup steps:
+
+- `.github/workflows/android-build.yml`
+- `.github/workflows/eas-update.yml`
+- `app.json`
+- `eas.json`
+- `metro.config.js`
+- `scripts/write-build-info.mjs`
+- `package.json` (scripts section)
+
+Total setup time on a new repo, once the operator has done the EAS account
+work and obtained an Android signing key, is approximately 30 minutes.
