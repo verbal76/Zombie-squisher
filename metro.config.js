@@ -7,6 +7,9 @@
 // `require('../../assets/character-a.glb')` resolves to an Expo Asset
 // module reference rather than failing the build.
 // Build trigger: 2026-05-10 / driving overhaul slice (build #45).
+// Bump 2026-05-11: force fresh APK so the fetch()->expo-file-system GLB
+// fix ships in the embedded bundle (OTAs are not reliably reaching some
+// devices; baking the fix into the APK avoids the OTA dependency).
 
 const { getDefaultConfig } = require('expo/metro-config');
 

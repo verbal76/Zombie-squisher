@@ -1,5 +1,5 @@
-import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Updates from 'expo-updates';
 import { BUILD_INFO } from '../__generated__/build-info';
 import { BUILD_VERSION, OTA_VERSION } from '../version';
@@ -48,6 +48,27 @@ function fmtBool(v: boolean | null, yes = 'yes', no = 'no'): string {
 export function AboutModal({ visible, onClose }: Props) {
   const ota = readOta();
   const stale = otaIsStale(ota);
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<string | null>(null);
+
+  const onCheckUpdate = async () => {
+    setChecking(true);
+    setCheckResult('Checking...');
+    try {
+      const update = await Updates.checkForUpdateAsync();
+      if (!update.isAvailable) {
+        setCheckResult('No newer OTA available for this build.');
+      } else {
+        setCheckResult('OTA available — downloading and applying...');
+        await Updates.fetchUpdateAsync();
+        await Updates.reloadAsync();
+      }
+    } catch (err: any) {
+      setCheckResult(`Error: ${err?.message ?? String(err)}`);
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const lines: Array<[string, string]> = [
     ['Build',               BUILD_VERSION],
@@ -84,6 +105,17 @@ export function AboutModal({ visible, onClose }: Props) {
             </Text>
           )}
 
+          <Pressable onPress={onCheckUpdate} disabled={checking} style={[styles.checkBtn, checking && styles.checkBtnDisabled]}>
+            {checking ? (
+              <ActivityIndicator color="#0a0a0a" />
+            ) : (
+              <Text style={styles.checkText}>CHECK FOR OTA UPDATE</Text>
+            )}
+          </Pressable>
+          {checkResult && (
+            <Text selectable style={styles.checkResult}>{checkResult}</Text>
+          )}
+
           <Text style={styles.hint}>Long-press the text to select, then "Copy".</Text>
 
           <Pressable onPress={onClose} style={styles.closeBtn}>
@@ -103,6 +135,10 @@ const styles = StyleSheet.create({
   scrollWrap: { maxHeight: 380 },
   body: { color: '#cfd', fontFamily: 'Courier', fontSize: 12, lineHeight: 18, backgroundColor: '#0a0a0a', borderColor: '#2a2a2a', borderWidth: 1, borderRadius: 6, padding: 10 },
   warn: { color: '#ffb04a', fontSize: 12, marginTop: 10, fontWeight: '700', textAlign: 'center' },
+  checkBtn: { marginTop: 10, backgroundColor: '#ffd24a', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+  checkBtnDisabled: { opacity: 0.6 },
+  checkText: { color: '#0a0a0a', fontWeight: '900', letterSpacing: 2 },
+  checkResult: { color: '#9ff', fontFamily: 'Courier', fontSize: 11, marginTop: 6, padding: 8, backgroundColor: '#0a0a0a', borderRadius: 6 },
   hint: { color: '#888', fontSize: 10, fontStyle: 'italic', marginTop: 8, textAlign: 'center' },
   closeBtn: { marginTop: 14, backgroundColor: '#2a2a2a', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
   closeText: { color: '#ffd24a', fontWeight: '800', letterSpacing: 2 },
