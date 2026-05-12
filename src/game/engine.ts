@@ -54,6 +54,30 @@ export interface World {
 export type StreakBannerKind = 'spree' | 'reaper' | 'breaker' | 'apocalypse' | null;
 export const KILL_SPEED = 50;
 
+// Tuning constants. Everything magic-numbery that affects feel lives here so a
+// balance pass is "edit one block" rather than "grep across files". See
+// docs/glb-render-pipeline.md philosophy + the top-down movement design doc.
+export const TUNING = {
+  /** Zombie velocity lerp constant. vel approaches target at 1 - exp(-k*dt). */
+  ZOMBIE_MOVE_LERP_K: 3.0,
+  /** Where on the ring around the car new zombies spawn. */
+  SPAWN_RING_RADIUS: 750,
+  /** Minimum distance between two spawning zombies; rerolled if too close. */
+  SPAWN_MIN_DIST: 30,
+  /** Max rejection-sampling rerolls before we just accept the last candidate. */
+  SPAWN_MAX_RETRIES: 4,
+  /** Camera scans zombies within this radius for the "scale framing" zoom. */
+  ZOOM_CONSIDERATION_RADIUS: 1500,
+  /** Mesh sizes at/below this read as "small", no zoom bonus. */
+  ZOOM_SIZE_THRESHOLD: 20,
+  /** At this size (boss territory) we apply the full zoom bonus. */
+  ZOOM_SIZE_AT_MIN: 36,
+  /** Multiplier added to camera zoom when biggest nearby entity reaches AT_MIN. */
+  ZOOM_BOSS_BONUS: 0.45,
+  /** Zoom convergence speed. Slower than camera follow so zoom feels deliberate. */
+  CAMERA_ZOOM_K: 1.5,
+} as const;
+
 export interface DerivedStats {
   speed: number;
   armor: number;
@@ -303,14 +327,24 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     world.nextBossKills += 200 + world.wave * 30;
   }
 
+  // Unified zombie integrator. Each archetype contributes only its `intent`
+  // scalar (-1.5..+1.5, see intentFor) -- the movement loop itself is the
+  // same for everyone. Vel lerps toward target via 1 - exp(-k*dt), then
+  // position integrates as pos += vel * dt. Identical pattern to the player
+  // car so feel reads consistently across archetypes.
+  const zMoveAlpha = 1 - Math.exp(-TUNING.ZOMBIE_MOVE_LERP_K * dt);
   for (const z of world.zombies) {
-    z.y += z.vy * dt;
-    z.x += z.vx * dt;
-    const chasePull = z.kind === 'boss' ? 12 : 40;
     const dx = world.carX - z.x;
     const dy = world.carY - z.y;
-    z.x += Math.sign(dx) * Math.min(Math.abs(dx), chasePull * dt);
-    z.y += Math.sign(dy) * Math.min(Math.abs(dy), chasePull * dt);
+    const dst = Math.hypot(dx, dy) || 1;
+    const def = ZOMBIE_DEFS[z.kind];
+    const intent = intentFor(z, dst);
+    const targetVx = (dx / dst) * def.speed * intent;
+    const targetVy = (dy / dst) * def.speed * intent;
+    z.vx += (targetVx - z.vx) * zMoveAlpha;
+    z.vy += (targetVy - z.vy) * zMoveAlpha;
+    z.x += z.vx * dt;
+    z.y += z.vy * dt;
   }
 
   if (weapon.id !== 'none' && input.fire) {
@@ -470,17 +504,49 @@ function spawnBlood(world: World, z: Zombie): void {
   }
 }
 
-const SPAWN_RING_RADIUS = 750;
+// Per-archetype movement intent in the (-1.5, +1.5) range. Magnitude scales
+// def.speed; sign chooses forward (toward player) vs. backward (kiting).
+// Default = full pursuit. Override per kind when an archetype wants
+// distinct behavior (sniper holding range, kiter retreating up close, etc.).
+function intentFor(z: Zombie, dst: number): number {
+  switch (z.kind) {
+    case 'runner': return 1.1;            // sprints in
+    case 'brute':  return 0.85;           // heavier, slightly slower than peak
+    case 'spitter': return dst < 180 ? -0.6 : (dst > 360 ? 0.4 : 1.0); // kites in close, paces at range
+    case 'boss':   return 0.9;            // intimidating cruise
+    case 'walker':
+    default:       return 1.0;
+  }
+}
 
 function spawnZombie(world: World, forceBoss: boolean): void {
   const kind = forceBoss ? 'boss' : pickZombieKind(world.wave);
   const def = ZOMBIE_DEFS[kind];
-  const angle = Math.random() * Math.PI * 2;
-  const x = world.carX + Math.cos(angle) * SPAWN_RING_RADIUS;
-  const y = world.carY + Math.sin(angle) * SPAWN_RING_RADIUS;
+
+  // Bounded rejection sampling: roll a position on the spawn ring; if it
+  // lands within SPAWN_MIN_DIST of an existing zombie, reroll. Cap at
+  // SPAWN_MAX_RETRIES and accept the last candidate even if it's still
+  // close -- better a slightly-stacked spawn than a skipped spawn.
+  let x = 0, y = 0;
+  const minDistSq = TUNING.SPAWN_MIN_DIST * TUNING.SPAWN_MIN_DIST;
+  for (let attempt = 0; attempt <= TUNING.SPAWN_MAX_RETRIES; attempt++) {
+    const angle = Math.random() * Math.PI * 2;
+    x = world.carX + Math.cos(angle) * TUNING.SPAWN_RING_RADIUS;
+    y = world.carY + Math.sin(angle) * TUNING.SPAWN_RING_RADIUS;
+    let tooClose = false;
+    for (const other of world.zombies) {
+      const ddx = x - other.x;
+      const ddy = y - other.y;
+      if (ddx * ddx + ddy * ddy < minDistSq) { tooClose = true; break; }
+    }
+    if (!tooClose) break;
+  }
+
   const dx = world.carX - x;
   const dy = world.carY - y;
   const dist = Math.hypot(dx, dy) || 1;
+  // Seed velocity toward the player so the first tick already moves inward
+  // (the per-tick integrator will lerp toward the intent-scaled target).
   const vx = (dx / dist) * def.speed * 0.5;
   const vy = (dy / dist) * def.speed * 0.5;
   const hp = def.hp + world.wave * (kind === 'boss' ? 40 : 4);

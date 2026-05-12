@@ -5,7 +5,7 @@ import { Box3, Object3D, Vector3 } from 'three';
 import { Progress, Vehicle, Projectile, BloodSpot } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
-import { World, createWorld, step, KILL_SPEED, StreakBannerKind } from '../game/engine';
+import { World, createWorld, step, KILL_SPEED, StreakBannerKind, TUNING } from '../game/engine';
 import { VEHICLE_GLB } from '../data/objects';
 import { loadVehicleGLB } from '../render/loadVehicle';
 import { Thumbstick, ThumbstickHandle } from './Thumbstick';
@@ -343,8 +343,10 @@ const CAM_REFERENCE_LENGTH = 80;
 
 function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const focal = useRef<{ x: number; y: number; vx: number; vy: number; init: boolean }>({ x: 0, y: 0, vx: 0, vy: 0, init: false });
-  // Floored at 0.85 so very short vehicles don't pinch the camera in too far.
-  const zoom = Math.max(0.85, vehicle.height / CAM_REFERENCE_LENGTH);
+  const zoomState = useRef<number>(1.0);
+  // Per-vehicle baseline: longer vehicles pull camera back, floored at 0.85
+  // so tiny vehicles don't pinch us in.
+  const vehicleZoom = Math.max(0.85, vehicle.height / CAM_REFERENCE_LENGTH);
   useFrame((state, dt) => {
     const f = focal.current;
     if (!f.init) {
@@ -353,6 +355,7 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
       f.vx = world.carVx;
       f.vy = world.carVy;
       f.init = true;
+      zoomState.current = vehicleZoom;
     }
     // Smoothed camera velocity: the lookahead reads from this lagged value, not
     // the instantaneous car velocity. Without smoothing, sudden braking pops
@@ -369,6 +372,26 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     const lerp = 1 - Math.pow(0.02, dt);
     f.x += (targetX - f.x) * lerp;
     f.y += (targetY - f.y) * lerp;
+    // Context-aware zoom: scan zombies within consideration radius for the
+    // biggest one. Bosses (size 36) pull the camera back so their full silhouette
+    // reads; walkers (size 14) contribute nothing. Bonus is piecewise linear
+    // between ZOOM_SIZE_THRESHOLD and ZOOM_SIZE_AT_MIN.
+    let maxNearbySize = 0;
+    const rSq = TUNING.ZOOM_CONSIDERATION_RADIUS * TUNING.ZOOM_CONSIDERATION_RADIUS;
+    for (const z of world.zombies) {
+      const ddx = z.x - f.x;
+      const ddy = z.y - f.y;
+      if (ddx * ddx + ddy * ddy < rSq && z.size > maxNearbySize) maxNearbySize = z.size;
+    }
+    const sizeFrac = Math.max(0, Math.min(1,
+      (maxNearbySize - TUNING.ZOOM_SIZE_THRESHOLD) /
+      (TUNING.ZOOM_SIZE_AT_MIN - TUNING.ZOOM_SIZE_THRESHOLD)
+    ));
+    const targetZoom = vehicleZoom * (1 + sizeFrac * TUNING.ZOOM_BOSS_BONUS);
+    // Slow lerp so the zoom doesn't twitch as zombies pop in and out of range.
+    const zoomAlpha = 1 - Math.exp(-TUNING.CAMERA_ZOOM_K * dt);
+    zoomState.current += (targetZoom - zoomState.current) * zoomAlpha;
+    const zoom = zoomState.current;
     // Shake: small random offset scaled by world.shake (kill / explosion impulse).
     const sx = (Math.random() - 0.5) * world.shake * 3;
     const sz = (Math.random() - 0.5) * world.shake * 3;
@@ -591,9 +614,9 @@ const styles = StyleSheet.create({
   btnBrake: { backgroundColor: 'rgba(220,80,80,0.85)', borderColor: '#3a0a0a' },
   btnFire: { backgroundColor: 'rgba(255,180,40,0.9)', borderColor: '#3a2a00' },
   btnText: { color: '#000', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
-  abilityBtn: { position: 'absolute', right: 16, top: 80, backgroundColor: '#222', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, borderWidth: 2, borderColor: '#ffd24a' },
+  abilityBtn: { position: 'absolute', right: 16, top: 80, backgroundColor: '#222', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 2, borderColor: '#ffd24a', minWidth: 110, alignItems: 'center' },
   abilityBtnDisabled: { opacity: 0.5, borderColor: '#555' },
-  abilityText: { color: '#ffd24a', fontWeight: '800', letterSpacing: 1 },
+  abilityText: { color: '#ffd24a', fontWeight: '800', fontSize: 13 },
   abilityCdBar: { marginTop: 6, height: 4, width: 90, backgroundColor: '#333', borderRadius: 2, overflow: 'hidden' },
   abilityCdFill: { height: '100%', backgroundColor: '#ffd24a' },
   momentumWrap: { marginTop: 2, height: 6, backgroundColor: '#1a1a1a', borderRadius: 3, overflow: 'hidden', position: 'relative' },
