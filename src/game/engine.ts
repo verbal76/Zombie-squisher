@@ -275,22 +275,20 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const gripRetain = gripBase + (gripLoose - gripBase) * speedFracForGrip;
   vR *= Math.pow(gripRetain, dt);
 
-  // Smooth the wheel input toward the raw stick value. Slowed from 0.15 to
-  // 0.30 (~70 %/sec closure) for a heavier wheel feel and more give on
-  // direction changes.
-  const steerLerp = 1 - Math.pow(0.30, dt);
+  // Smooth the wheel input toward the raw stick value. Tightened from 0.30
+  // to 0.10 retain (~90 %/sec closure, ~0.3 s half-life) so steering follows
+  // the stick promptly instead of feeling stuck and only wobbling the body.
+  const steerLerp = 1 - Math.pow(0.10, dt);
   world.steeringAngle += (input.wheel - world.steeringAngle) * steerLerp;
 
-  // Speed-sensitive steering authority. Full response below ~20% of max
-  // speed, tapers to ~20% at top (was 30%). Below crawl speed, response ramps
-  // up from 0 so the car can't pivot in place. Steeper falloff at the high
-  // end keeps zigzagging in check.
+  // Speed-sensitive steering authority. Full response from a standstill up
+  // through 20 % of max speed so the car can pivot in place / turn out of a
+  // crawl. Above 20 %, authority tapers to ~20 % at top speed to keep
+  // high-speed zig-zagging in check.
   const absVF = Math.abs(vF);
   const speedNorm = Math.min(1, absVF / Math.max(1, stats.speed));
   let speedSteer: number;
-  if (speedNorm < 0.05) {
-    speedSteer = speedNorm / 0.05;
-  } else if (speedNorm < 0.20) {
+  if (speedNorm < 0.20) {
     speedSteer = 1;
   } else {
     // Power-curve taper: aggressive falloff into top speed.
