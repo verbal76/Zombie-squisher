@@ -111,17 +111,38 @@ async function loadOnce(mod: number): Promise<Group> {
   // crashes in getDimensions() on image.width. Nulling these refs first
   // means even if our own colormap attach below fails, the scene is still
   // safe to render.
+  //
+  // We also disable frustumCulled per bug #9 of glb-render-pipeline.md:
+  // after scaling/centering, a mesh's boundingSphere can end up degenerate
+  // and three's culler then decides "off-screen" every frame, silently
+  // hiding the mesh. For small scenes culling buys nothing.
+  //
+  // Recompute boundingBox + boundingSphere after stripping so any later
+  // transforms operate on fresh bounds.
   const textureKeys = [
     'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap',
     'emissiveMap', 'bumpMap', 'displacementMap', 'alphaMap',
     'envMap', 'lightMap', 'specularMap',
+    'gradientMap', 'matcap',
+    'clearcoatMap', 'clearcoatRoughnessMap', 'clearcoatNormalMap',
+    'sheenColorMap', 'sheenRoughnessMap',
+    'transmissionMap', 'thicknessMap',
+    'iridescenceMap', 'iridescenceThicknessMap',
+    'anisotropyMap',
   ];
   gltf.scene.traverse((node: any) => {
-    if (node.isMesh && node.material) {
-      for (const key of textureKeys) {
-        if (node.material[key]) node.material[key] = null;
+    if (node.isMesh) {
+      node.frustumCulled = false;
+      if (node.material) {
+        for (const key of textureKeys) {
+          if (node.material[key]) node.material[key] = null;
+        }
+        node.material.needsUpdate = true;
       }
-      node.material.needsUpdate = true;
+      if (node.geometry) {
+        node.geometry.computeBoundingBox();
+        node.geometry.computeBoundingSphere();
+      }
     }
   });
 

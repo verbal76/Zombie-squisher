@@ -1,3 +1,8 @@
+// CRITICAL: _polyfills MUST be the very first import. It sets
+// navigator.userAgent before any module imports GLTFLoader (which would
+// otherwise crash in Hermes). See src/_polyfills.ts for details.
+import './src/_polyfills';
+
 import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
