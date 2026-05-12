@@ -6,10 +6,11 @@
 
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
-import { Group, Object3D, Texture, TextureLoader } from 'three';
+import { BufferAttribute, Group, MeshBasicMaterial, Object3D } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CHARACTER_GLB, CHARACTER_TEX, CharacterId } from '../assets/characters';
 import { Diag } from '../debug/diagnostics';
+import { getPaletteSampler, PaletteSampler } from './paletteSampler';
 
 const cache: Partial<Record<CharacterId, Group>> = {};
 const loading: Partial<Record<CharacterId, Promise<Group>>> = {};
@@ -73,13 +74,34 @@ function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
   return out.buffer;
 }
 
-async function loadTextureFromAsset(mod: number): Promise<Texture | null> {
-  const asset = Asset.fromModule(mod);
-  await asset.downloadAsync();
-  const uri = asset.localUri ?? asset.uri;
-  if (!uri) return null;
-  return new Promise<Texture>((resolve, reject) => {
-    new TextureLoader().load(uri, resolve, undefined, reject);
+// Bake per-vertex colors into every mesh in the scene by sampling the
+// character's palette PNG at each vertex's UV. Then replace the material
+// with MeshBasicMaterial(vertexColors=true) so no GPU texture is ever
+// uploaded. See bug #6 of docs/glb-render-pipeline.md.
+function bakeVertexColors(scene: Group, sampler: PaletteSampler): void {
+  scene.traverse((node: any) => {
+    if (!node.isMesh || !node.geometry) return;
+    const geom = node.geometry;
+    const uv = geom.getAttribute('uv');
+    if (!uv) {
+      node.material = new MeshBasicMaterial({ color: 0x888888 });
+      return;
+    }
+    const count = uv.count;
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const u = uv.getX(i);
+      const v = uv.getY(i);
+      const rgb = sampler.sample(u, v);
+      colors[i * 3]     = rgb[0];
+      colors[i * 3 + 1] = rgb[1];
+      colors[i * 3 + 2] = rgb[2];
+    }
+    geom.setAttribute('color', new BufferAttribute(colors, 3));
+    node.material = new MeshBasicMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+    });
   });
 }
 
@@ -139,21 +161,12 @@ async function loadOnce(id: CharacterId): Promise<Group> {
     }
   });
 
-  // Apply the matching texture to every mesh in the model.
+  // Bake vertex colors from this character's palette PNG.
   try {
-    const tex = await loadTextureFromAsset(CHARACTER_TEX[id]);
-    if (tex) {
-      tex.flipY = false; // glTF convention
-      tex.needsUpdate = true;
-      gltf.scene.traverse((node: any) => {
-        if (node.isMesh && node.material) {
-          node.material.map = tex;
-          node.material.needsUpdate = true;
-        }
-      });
-    }
+    const palette = await getPaletteSampler(CHARACTER_TEX[id]);
+    bakeVertexColors(gltf.scene, palette);
   } catch (err) {
-    console.warn(`character ${id}: texture attach failed`, err);
+    console.warn(`character ${id}: vertex color bake failed`, err);
   }
 
   return gltf.scene as Group;

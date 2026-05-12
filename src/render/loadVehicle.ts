@@ -9,10 +9,11 @@
 
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
-import { Group, Object3D, Texture, TextureLoader } from 'three';
+import { BufferAttribute, Group, MeshBasicMaterial, Object3D } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { COLORMAP_TEX } from '../data/objects';
 import { Diag } from '../debug/diagnostics';
+import { getPaletteSampler, PaletteSampler } from './paletteSampler';
 
 async function readBufferFromUri(uri: string): Promise<ArrayBuffer> {
   // fetch() of file:// URIs is unreliable on Android (empty body / hangs).
@@ -30,29 +31,37 @@ async function readBufferFromUri(uri: string): Promise<ArrayBuffer> {
 const cache: Map<number, Group> = new Map();
 const loading: Map<number, Promise<Group>> = new Map();
 
-// Shared colormap texture, loaded once.
-let colormapTex: Texture | null = null;
-let colormapLoading: Promise<Texture> | null = null;
-
-async function getColormap(): Promise<Texture> {
-  if (colormapTex) return colormapTex;
-  if (!colormapLoading) {
-    colormapLoading = (async () => {
-      const asset = Asset.fromModule(COLORMAP_TEX);
-      await asset.downloadAsync();
-      const uri = asset.localUri ?? asset.uri;
-      if (!uri) throw new Error('colormap: no URI');
-      return new Promise<Texture>((resolve, reject) => {
-        new TextureLoader().load(uri, (t) => {
-          t.flipY = false;
-          t.needsUpdate = true;
-          colormapTex = t;
-          resolve(t);
-        }, undefined, reject);
-      });
-    })();
-  }
-  return colormapLoading;
+// Bake per-vertex colors into every mesh in the scene by sampling the
+// palette PNG at each vertex's UV. Then replace the material with
+// MeshBasicMaterial(vertexColors=true) so no GPU texture is ever uploaded.
+// See bug #6 of docs/glb-render-pipeline.md for the rationale.
+function bakeVertexColors(scene: Group, sampler: PaletteSampler): void {
+  scene.traverse((node: any) => {
+    if (!node.isMesh || !node.geometry) return;
+    const geom = node.geometry;
+    const uv = geom.getAttribute('uv');
+    if (!uv) {
+      // No UVs -> no way to sample. Replace material with a neutral grey
+      // so the mesh still renders rather than crashing somewhere downstream.
+      node.material = new MeshBasicMaterial({ color: 0x888888 });
+      return;
+    }
+    const count = uv.count;
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const u = uv.getX(i);
+      const v = uv.getY(i);
+      const rgb = sampler.sample(u, v);
+      colors[i * 3]     = rgb[0];
+      colors[i * 3 + 1] = rgb[1];
+      colors[i * 3 + 2] = rgb[2];
+    }
+    geom.setAttribute('color', new BufferAttribute(colors, 3));
+    node.material = new MeshBasicMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+    });
+  });
 }
 
 // Mirrors the same GLB JSON-patch from loadCharacter.ts — strips images[i].uri
@@ -147,15 +156,10 @@ async function loadOnce(mod: number): Promise<Group> {
   });
 
   try {
-    const tex = await getColormap();
-    gltf.scene.traverse((node: any) => {
-      if (node.isMesh && node.material) {
-        node.material.map = tex;
-        node.material.needsUpdate = true;
-      }
-    });
+    const palette = await getPaletteSampler(COLORMAP_TEX);
+    bakeVertexColors(gltf.scene, palette);
   } catch (err) {
-    console.warn('vehicle GLB: colormap attach failed', err);
+    console.warn('vehicle GLB: vertex color bake failed', err);
   }
 
   return gltf.scene as Group;

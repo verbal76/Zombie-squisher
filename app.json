@@ -42,7 +42,8 @@
             "kotlinVersion": "1.9.25"
           }
         }
-      ]
+      ],
+      "./plugins/with-no-compress-glb.js"
     ],
     "extra": {
       "eas": {
