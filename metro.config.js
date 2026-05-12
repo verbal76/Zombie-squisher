@@ -10,6 +10,9 @@
 // Bump 2026-05-11: force fresh APK so the fetch()->expo-file-system GLB
 // fix ships in the embedded bundle (OTAs are not reliably reaching some
 // devices; baking the fix into the APK avoids the OTA dependency).
+// Bump 2026-05-12: trigger APK so the GLB-JSON full-texture-strip fix
+// (fb0b25d) ships embedded -- devices without the latest OTA will still
+// load Kenney vehicle/character meshes correctly.
 
 const { getDefaultConfig } = require('expo/metro-config');
 
