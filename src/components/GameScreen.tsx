@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { Canvas, useFrame } from '@react-three/fiber/native';
-import { Object3D } from 'three';
+import { Box3, Object3D, Vector3 } from 'three';
 import { Progress, Vehicle, Projectile, BloodSpot } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
@@ -389,10 +389,23 @@ const CAR_VISUAL_SCALE = 1.2;
 const MAX_BODY_PITCH = 0.12;
 const MAX_BODY_ROLL = 0.14;
 
-// Kenney vehicle GLBs are ~1 unit wide in their own coordinate space.
-// Scale by vehicle.width so the 3D mesh footprint matches the physics AABB.
-// The GLB Y-origin is at wheel level so we lift the group by just CAR_LIFT.
+// Kenney vehicle GLBs are authored at varying intrinsic sizes (a tank is
+// natively much larger than a hatchback). Applying a uniform scale based
+// on vehicle.width alone produces inconsistent on-screen footprints. We
+// instead auto-fit after load: measure the model's bbox, then scale so
+// its longest horizontal axis lands on the game's `vehicle.height` length
+// (multiplied by CAR_VISUAL_SCALE). Proportions stay correct per GLB,
+// and the rendered footprint matches the gameplay AABB.
 const VEH_GLB_Y = CAR_LIFT;
+
+function fitScaleFor(model: Object3D, vehicle: Vehicle): number {
+  const bbox = new Box3().setFromObject(model);
+  const size = bbox.getSize(new Vector3());
+  const naturalLength = Math.max(size.x, size.z);
+  if (!Number.isFinite(naturalLength) || naturalLength <= 0) return CAR_VISUAL_SCALE;
+  const targetLength = vehicle.height * CAR_VISUAL_SCALE;
+  return targetLength / naturalLength;
+}
 
 function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const outer = useRef<any>(null);
@@ -401,15 +414,20 @@ function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const pitch = useRef(0);
   const roll = useRef(0);
   const [model, setModel] = useState<Object3D | null>(null);
+  const [autoScale, setAutoScale] = useState<number>(CAR_VISUAL_SCALE);
 
   useEffect(() => {
     let mounted = true;
     const mod = VEHICLE_GLB[vehicle.id];
     loadVehicleGLB(mod)
-      .then((m) => { if (mounted) setModel(m); })
+      .then((m) => {
+        if (!mounted) return;
+        setAutoScale(fitScaleFor(m, vehicle));
+        setModel(m);
+      })
       .catch((err) => console.warn('vehicle GLB load failed', vehicle.id, err?.message ?? err));
     return () => { mounted = false; };
-  }, [vehicle.id]);
+  }, [vehicle.id, vehicle.height]);
 
   useFrame((_, dt) => {
     if (!outer.current || !inner.current) return;
@@ -433,13 +451,11 @@ function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     inner.current.rotation.z = roll.current;
   });
 
-  const glbScale = vehicle.width * CAR_VISUAL_SCALE;
-
   return (
     <group ref={outer}>
       <group ref={inner}>
         {model ? (
-          <group scale={glbScale}>
+          <group scale={autoScale}>
             <primitive object={model} />
           </group>
         ) : (
