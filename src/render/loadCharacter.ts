@@ -25,6 +25,12 @@ async function fetchBuffer(uri: string): Promise<ArrayBuffer> {
   return bytes.buffer;
 }
 
+// See the matching comment in loadVehicle.ts: we must strip the entire
+// images/textures arrays AND every texture reference inside each material
+// from the GLB's JSON header, not just the image URIs. The previous "delete
+// img.uri" approach left empty image entries behind that GLTFLoader then
+// rejected with "Image N is missing URI and bufferView", which threw before
+// our post-parse texture strip could run.
 function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
   const view = new DataView(buffer);
   if (view.getUint32(0, true) !== 0x46546c67) return buffer;
@@ -35,14 +41,52 @@ function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
   const jsonStr = new TextDecoder().decode(jsonBytes);
   const gltf = JSON.parse(jsonStr);
   let touched = false;
-  if (Array.isArray(gltf.images)) {
-    for (const img of gltf.images) {
-      if (img && typeof img.uri === 'string') {
-        delete img.uri;
-        touched = true;
+
+  if (Array.isArray(gltf.images) && gltf.images.length > 0) {
+    gltf.images = [];
+    touched = true;
+  }
+  if (Array.isArray(gltf.textures) && gltf.textures.length > 0) {
+    gltf.textures = [];
+    touched = true;
+  }
+  if (Array.isArray(gltf.materials)) {
+    const matSlots = [
+      'normalTexture', 'occlusionTexture', 'emissiveTexture',
+    ];
+    const pbrSlots = [
+      'baseColorTexture', 'metallicRoughnessTexture',
+    ];
+    const extSlots: Record<string, string[]> = {
+      KHR_materials_clearcoat: ['clearcoatTexture', 'clearcoatRoughnessTexture', 'clearcoatNormalTexture'],
+      KHR_materials_sheen: ['sheenColorTexture', 'sheenRoughnessTexture'],
+      KHR_materials_transmission: ['transmissionTexture'],
+      KHR_materials_volume: ['thicknessTexture'],
+      KHR_materials_iridescence: ['iridescenceTexture', 'iridescenceThicknessTexture'],
+      KHR_materials_anisotropy: ['anisotropyTexture'],
+      KHR_materials_specular: ['specularTexture', 'specularColorTexture'],
+    };
+    for (const mat of gltf.materials) {
+      for (const k of matSlots) {
+        if (mat[k]) { delete mat[k]; touched = true; }
+      }
+      if (mat.pbrMetallicRoughness) {
+        for (const k of pbrSlots) {
+          if (mat.pbrMetallicRoughness[k]) { delete mat.pbrMetallicRoughness[k]; touched = true; }
+        }
+      }
+      if (mat.extensions) {
+        for (const extName of Object.keys(extSlots)) {
+          const ext = mat.extensions[extName];
+          if (!ext) continue;
+          for (const k of extSlots[extName]) {
+            if (ext[k]) { delete ext[k]; touched = true; }
+          }
+        }
       }
     }
   }
+
   if (!touched) return buffer;
 
   let newJson = JSON.stringify(gltf);

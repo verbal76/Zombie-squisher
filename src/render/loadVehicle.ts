@@ -64,8 +64,19 @@ function bakeVertexColors(scene: Group, sampler: PaletteSampler): void {
   });
 }
 
-// Mirrors the same GLB JSON-patch from loadCharacter.ts — strips images[i].uri
-// so GLTFLoader.parse doesn't attempt to fetch relative texture paths.
+// Strip every texture-related thing from the GLB's JSON header before
+// GLTFLoader parses it.
+//
+// The naive approach was `delete img.uri` -- which left empty image entries
+// behind. GLTFLoader then validated them, found no URI and no bufferView,
+// and threw "Image 0 is missing URI and bufferView" before our defensive
+// post-parse strip could run.
+//
+// The correct fix is to remove ALL three of: the images array, the textures
+// array, and every texture reference inside each material (and inside any
+// PBR extension on those materials). Nothing left for GLTFLoader to load
+// or validate. material.color / baseColorFactor still work fine -- the
+// post-parse vertex-color bake will overwrite them anyway.
 function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
   const view = new DataView(buffer);
   if (view.getUint32(0, true) !== 0x46546c67) return buffer;
@@ -74,11 +85,52 @@ function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
   const jsonBytes = new Uint8Array(buffer, 20, jsonLen);
   const gltf = JSON.parse(new TextDecoder().decode(jsonBytes));
   let touched = false;
-  if (Array.isArray(gltf.images)) {
-    for (const img of gltf.images) {
-      if (img && typeof img.uri === 'string') { delete img.uri; touched = true; }
+
+  if (Array.isArray(gltf.images) && gltf.images.length > 0) {
+    gltf.images = [];
+    touched = true;
+  }
+  if (Array.isArray(gltf.textures) && gltf.textures.length > 0) {
+    gltf.textures = [];
+    touched = true;
+  }
+  if (Array.isArray(gltf.materials)) {
+    const matSlots = [
+      'normalTexture', 'occlusionTexture', 'emissiveTexture',
+    ];
+    const pbrSlots = [
+      'baseColorTexture', 'metallicRoughnessTexture',
+    ];
+    const extSlots: Record<string, string[]> = {
+      KHR_materials_clearcoat: ['clearcoatTexture', 'clearcoatRoughnessTexture', 'clearcoatNormalTexture'],
+      KHR_materials_sheen: ['sheenColorTexture', 'sheenRoughnessTexture'],
+      KHR_materials_transmission: ['transmissionTexture'],
+      KHR_materials_volume: ['thicknessTexture'],
+      KHR_materials_iridescence: ['iridescenceTexture', 'iridescenceThicknessTexture'],
+      KHR_materials_anisotropy: ['anisotropyTexture'],
+      KHR_materials_specular: ['specularTexture', 'specularColorTexture'],
+    };
+    for (const mat of gltf.materials) {
+      for (const k of matSlots) {
+        if (mat[k]) { delete mat[k]; touched = true; }
+      }
+      if (mat.pbrMetallicRoughness) {
+        for (const k of pbrSlots) {
+          if (mat.pbrMetallicRoughness[k]) { delete mat.pbrMetallicRoughness[k]; touched = true; }
+        }
+      }
+      if (mat.extensions) {
+        for (const extName of Object.keys(extSlots)) {
+          const ext = mat.extensions[extName];
+          if (!ext) continue;
+          for (const k of extSlots[extName]) {
+            if (ext[k]) { delete ext[k]; touched = true; }
+          }
+        }
+      }
     }
   }
+
   if (!touched) return buffer;
 
   let newJson = JSON.stringify(gltf);
