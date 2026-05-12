@@ -313,36 +313,14 @@ function GrassGround({ world }: { world: World }) {
 }
 
 function CameraTracker({ world }: { world: World }) {
-  const focal = useRef<{ x: number; y: number; vx: number; vy: number; init: boolean }>({ x: 0, y: 0, vx: 0, vy: 0, init: false });
-  useFrame((state, dt) => {
-    const f = focal.current;
-    if (!f.init) {
-      f.x = world.carX;
-      f.y = world.carY;
-      f.vx = world.carVx;
-      f.vy = world.carVy;
-      f.init = true;
-    }
-    // Smoothed camera velocity: the lookahead reads from this lagged value, not
-    // the instantaneous car velocity. Without smoothing, sudden braking pops
-    // the focal point and the world appears to lurch forward (which made it
-    // feel like the gas pedal controlled zombie speed).
-    const vLerp = 1 - Math.pow(0.2, dt);
-    f.vx += (world.carVx - f.vx) * vLerp;
-    f.vy += (world.carVy - f.vy) * vLerp;
-    // Mild lookahead so player sees a bit more space in the direction of travel.
-    const lookAhead = 0.06;
-    const targetX = world.carX + f.vx * lookAhead;
-    const targetY = world.carY + f.vy * lookAhead;
-    // Tight focal follow keeps the car centered.
-    const lerp = 1 - Math.pow(0.02, dt);
-    f.x += (targetX - f.x) * lerp;
-    f.y += (targetY - f.y) * lerp;
-    // Shake: small random offset scaled by world.shake (kill / explosion impulse).
+  useFrame((state) => {
+    // Camera is anchored directly to the car. No velocity lookahead or focal
+    // smoothing: those couple the camera to gas/brake momentum, which makes
+    // stationary zombies appear to slide along with the car during accel/brake.
     const sx = (Math.random() - 0.5) * world.shake * 3;
     const sz = (Math.random() - 0.5) * world.shake * 3;
-    state.camera.position.set(f.x + CAM_OFFSET_X + sx, CAM_HEIGHT, f.y + CAM_OFFSET_Z + sz);
-    state.camera.lookAt(f.x, 0, f.y);
+    state.camera.position.set(world.carX + CAM_OFFSET_X + sx, CAM_HEIGHT, world.carY + CAM_OFFSET_Z + sz);
+    state.camera.lookAt(world.carX, 0, world.carY);
   });
   return null;
 }
