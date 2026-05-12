@@ -102,6 +102,28 @@ async function loadOnce(mod: number): Promise<Group> {
     loader.parse(patched, '', resolve, reject);
   });
 
+  // CRITICAL: null every texture slot on every parsed material BEFORE the
+  // scene reaches the renderer. GLTFLoader creates THREE.Texture instances
+  // pointing at the GLB's internal images, but in React Native there's no
+  // Image constructor so those textures' .image stays undefined. The
+  // renderer's compile/upload path runs before any later .map swap and
+  // crashes in getDimensions() on image.width. Nulling these refs first
+  // means even if our own colormap attach below fails, the scene is still
+  // safe to render.
+  const textureKeys = [
+    'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap',
+    'emissiveMap', 'bumpMap', 'displacementMap', 'alphaMap',
+    'envMap', 'lightMap', 'specularMap',
+  ];
+  gltf.scene.traverse((node: any) => {
+    if (node.isMesh && node.material) {
+      for (const key of textureKeys) {
+        if (node.material[key]) node.material[key] = null;
+      }
+      node.material.needsUpdate = true;
+    }
+  });
+
   try {
     const tex = await getColormap();
     gltf.scene.traverse((node: any) => {
