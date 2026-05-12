@@ -193,7 +193,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         <ambientLight intensity={0.85} />
         <directionalLight position={[400, 600, 200]} intensity={0.6} />
 
-        <CameraTracker world={w} />
+        <CameraTracker world={w} vehicle={vehicle} />
 
         <GrassGround world={w} />
 
@@ -335,8 +335,16 @@ function GrassGround({ world }: { world: World }) {
   );
 }
 
-function CameraTracker({ world }: { world: World }) {
+// Reference vehicle length the camera was tuned for. Vehicles longer than
+// this pull the camera back proportionally so the whole car stays in frame
+// and the size hierarchy is visible (tank reads as bigger than hatchback,
+// not just same-frame-different-mesh).
+const CAM_REFERENCE_LENGTH = 80;
+
+function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const focal = useRef<{ x: number; y: number; vx: number; vy: number; init: boolean }>({ x: 0, y: 0, vx: 0, vy: 0, init: false });
+  // Floored at 0.85 so very short vehicles don't pinch the camera in too far.
+  const zoom = Math.max(0.85, vehicle.height / CAM_REFERENCE_LENGTH);
   useFrame((state, dt) => {
     const f = focal.current;
     if (!f.init) {
@@ -364,7 +372,14 @@ function CameraTracker({ world }: { world: World }) {
     // Shake: small random offset scaled by world.shake (kill / explosion impulse).
     const sx = (Math.random() - 0.5) * world.shake * 3;
     const sz = (Math.random() - 0.5) * world.shake * 3;
-    state.camera.position.set(f.x + CAM_OFFSET_X + sx, CAM_HEIGHT, f.y + CAM_OFFSET_Z + sz);
+    // Scale all three offsets (X, Y, Z) by the same zoom factor so the camera
+    // angle stays constant -- you only see more of the world, not a different
+    // perspective.
+    state.camera.position.set(
+      f.x + CAM_OFFSET_X * zoom + sx,
+      CAM_HEIGHT * zoom,
+      f.y + CAM_OFFSET_Z * zoom + sz,
+    );
     state.camera.lookAt(f.x, 0, f.y);
   });
   return null;
