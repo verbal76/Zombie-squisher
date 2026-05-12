@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Updates from 'expo-updates';
 import { BUILD_INFO } from '../__generated__/build-info';
 import { BUILD_VERSION, OTA_VERSION } from '../version';
+import { Diag, DiagSnapshot } from '../debug/diagnostics';
 
 interface Props {
   visible: boolean;
@@ -50,6 +51,12 @@ export function AboutModal({ visible, onClose }: Props) {
   const stale = otaIsStale(ota);
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<string | null>(null);
+  const [diag, setDiag] = useState<DiagSnapshot>(() => Diag.snapshot());
+  useEffect(() => {
+    if (!visible) return;
+    setDiag(Diag.snapshot());
+    return Diag.subscribe(() => setDiag(Diag.snapshot()));
+  }, [visible]);
 
   const onCheckUpdate = async () => {
     setChecking(true);
@@ -70,6 +77,13 @@ export function AboutModal({ visible, onClose }: Props) {
     }
   };
 
+  const modelLine = diag.modelsAttempted > 0
+    ? `${diag.modelsLoaded}/${diag.modelsAttempted}`
+    : '0/0';
+  const drawBufLine = diag.drawBufW > 0
+    ? `${diag.drawBufW}x${diag.drawBufH}`
+    : NA;
+
   const lines: Array<[string, string]> = [
     ['Build',               BUILD_VERSION],
     ['OTA',                 OTA_VERSION],
@@ -84,6 +98,12 @@ export function AboutModal({ visible, onClose }: Props) {
     ['OTA updateId',        ota.updateId ?? NA],
     ['OTA createdAt',       ota.createdAt ?? NA],
     ['Source',              fmtBool(ota.isEmbeddedLaunch, 'embedded (APK)', 'OTA download')],
+    ['---',                 '---'],
+    ['3D MODELS',           modelLine],
+    ['FRAMES',              String(diag.frames)],
+    ['DRAW BUF',            drawBufLine],
+    ['SCENE',               String(diag.sceneObjects)],
+    ['RENDER ERR',          diag.lastRenderError ?? '(none)'],
   ];
   const text = lines.map(([k, v]) => `${k.padEnd(22, ' ')}${v}`).join('\n')
     + (stale ? '\nWARNING               OTA older than embedded bundle (stale update)' : '');

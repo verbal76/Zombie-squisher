@@ -12,6 +12,7 @@ import { Thumbstick, ThumbstickHandle } from './Thumbstick';
 import { AboutModal } from './AboutModal';
 import { ZombieCharacter } from './ZombieCharacter';
 import { getGrassTexture } from '../render/grassTexture';
+import { Diag } from '../debug/diagnostics';
 
 interface Props {
   progress: Progress;
@@ -73,6 +74,8 @@ export function GameScreen({ progress, onEnd }: Props) {
   const ability = ABILITIES[progress.selectedAbility];
 
   useEffect(() => {
+    Diag.resetFrames();
+    Diag.clearRenderError();
     let raf = 0;
     let last = performance.now();
     let lastHudTick = last;
@@ -185,6 +188,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         gl={{ antialias: true }}
         camera={CAMERA_CONFIG}
       >
+        <FrameProbe />
         <color attach="background" args={['#3a4a2e']} />
         <ambientLight intensity={0.85} />
         <directionalLight position={[400, 600, 200]} intensity={0.6} />
@@ -294,6 +298,25 @@ export function GameScreen({ progress, onEnd }: Props) {
       <AboutModal visible={aboutOpen} onClose={() => setAboutOpen(false)} />
     </View>
   );
+}
+
+// Bumps the global frame counter every render tick and captures the GL
+// drawing buffer dimensions on first frame. Anything inside the Canvas
+// can call useFrame; this one's job is purely to surface render-loop
+// liveness to the diagnostics panel.
+function FrameProbe() {
+  const reported = useRef(false);
+  useFrame((state) => {
+    Diag.frame();
+    if (!reported.current) {
+      const w = state.size?.width ?? 0;
+      const h = state.size?.height ?? 0;
+      Diag.setDrawBuf(Math.round(w), Math.round(h));
+      Diag.setScene(state.scene.children.length);
+      reported.current = true;
+    }
+  });
+  return null;
 }
 
 function GrassGround({ world }: { world: World }) {

@@ -9,6 +9,7 @@ import * as FileSystem from 'expo-file-system';
 import { Group, Object3D, Texture, TextureLoader } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CHARACTER_GLB, CHARACTER_TEX, CharacterId } from '../assets/characters';
+import { Diag } from '../debug/diagnostics';
 
 const cache: Partial<Record<CharacterId, Group>> = {};
 const loading: Partial<Record<CharacterId, Promise<Group>>> = {};
@@ -138,13 +139,18 @@ async function loadOnce(id: CharacterId): Promise<Group> {
 }
 
 export async function loadCharacter(id: CharacterId): Promise<Object3D> {
-  if (cache[id]) return cache[id]!.clone(true);
+  Diag.attemptModel();
+  if (cache[id]) {
+    Diag.loadModel();
+    return cache[id]!.clone(true);
+  }
   if (!loading[id]) {
-    loading[id] = loadOnce(id).then((s) => {
+    loading[id] = loading[id] = loadOnce(id).then((s) => {
       cache[id] = s;
       return s;
     });
   }
   const s = await loading[id]!;
+  Diag.loadModel();
   return s.clone(true);
 }

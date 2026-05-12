@@ -8,6 +8,9 @@ import { MenuScreen } from './src/components/MenuScreen';
 import { GameScreen } from './src/components/GameScreen';
 import { GarageScreen } from './src/components/GarageScreen';
 import { GameOverScreen } from './src/components/GameOverScreen';
+import { installGlobalErrorHandler } from './src/debug/diagnostics';
+
+installGlobalErrorHandler();
 
 type Scene =
   | { name: 'menu' }

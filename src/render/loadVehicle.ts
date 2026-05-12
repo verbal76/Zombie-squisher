@@ -12,6 +12,7 @@ import * as FileSystem from 'expo-file-system';
 import { Group, Object3D, Texture, TextureLoader } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { COLORMAP_TEX } from '../data/objects';
+import { Diag } from '../debug/diagnostics';
 
 async function readBufferFromUri(uri: string): Promise<ArrayBuffer> {
   // fetch() of file:// URIs is unreliable on Android (empty body / hangs).
@@ -143,7 +144,11 @@ async function loadOnce(mod: number): Promise<Group> {
 // by require('../../assets/X.glb')). Result is cached; every call after the
 // first returns a clone so callers can modify transforms independently.
 export async function loadVehicleGLB(mod: number): Promise<Object3D> {
-  if (cache.has(mod)) return cache.get(mod)!.clone(true);
+  Diag.attemptModel();
+  if (cache.has(mod)) {
+    Diag.loadModel();
+    return cache.get(mod)!.clone(true);
+  }
   if (!loading.has(mod)) {
     loading.set(
       mod,
@@ -154,5 +159,6 @@ export async function loadVehicleGLB(mod: number): Promise<Object3D> {
     );
   }
   const scene = await loading.get(mod)!;
+  Diag.loadModel();
   return scene.clone(true);
 }
