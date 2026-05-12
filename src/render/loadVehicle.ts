@@ -183,7 +183,12 @@ export async function loadVehicleGLB(mod: number): Promise<Object3D> {
       }),
     );
   }
-  const scene = await loading.get(mod)!;
-  Diag.loadModel();
-  return scene.clone(true);
+  try {
+    const scene = await loading.get(mod)!;
+    Diag.loadModel();
+    return scene.clone(true);
+  } catch (err) {
+    Diag.setLoadError(`vehicle ${mod}`, err);
+    throw err;
+  }
 }

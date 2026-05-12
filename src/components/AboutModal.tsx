@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import * as Updates from 'expo-updates';
 import { BUILD_INFO } from '../__generated__/build-info';
 import { BUILD_VERSION, OTA_VERSION } from '../version';
@@ -103,6 +103,7 @@ export function AboutModal({ visible, onClose }: Props) {
     ['FRAMES',              String(diag.frames)],
     ['DRAW BUF',            drawBufLine],
     ['SCENE',               String(diag.sceneObjects)],
+    ['LOAD ERR',            diag.firstLoadError ?? '(none)'],
     ['RENDER ERR',          diag.lastRenderError ?? '(none)'],
   ];
   const text = lines.map(([k, v]) => `${k.padEnd(22, ' ')}${v}`).join('\n')
@@ -136,7 +137,14 @@ export function AboutModal({ visible, onClose }: Props) {
             <Text selectable style={styles.checkResult}>{checkResult}</Text>
           )}
 
-          <Text style={styles.hint}>Long-press the text to select, then "Copy".</Text>
+          <Pressable
+            onPress={() => Share.share({ message: text }).catch(() => {})}
+            style={styles.copyBtn}
+          >
+            <Text style={styles.copyText}>COPY ALL</Text>
+          </Pressable>
+
+          <Text style={styles.hint}>Long-press the text above to select, or use COPY ALL.</Text>
 
           <Pressable onPress={onClose} style={styles.closeBtn}>
             <Text style={styles.closeText}>CLOSE</Text>
@@ -159,6 +167,8 @@ const styles = StyleSheet.create({
   checkBtnDisabled: { opacity: 0.6 },
   checkText: { color: '#0a0a0a', fontWeight: '900', letterSpacing: 2 },
   checkResult: { color: '#9ff', fontFamily: 'Courier', fontSize: 11, marginTop: 6, padding: 8, backgroundColor: '#0a0a0a', borderRadius: 6 },
+  copyBtn: { marginTop: 8, backgroundColor: '#4ad1ff', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+  copyText: { color: '#0a0a0a', fontWeight: '900', letterSpacing: 2 },
   hint: { color: '#888', fontSize: 10, fontStyle: 'italic', marginTop: 8, textAlign: 'center' },
   closeBtn: { marginTop: 14, backgroundColor: '#2a2a2a', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
   closeText: { color: '#ffd24a', fontWeight: '800', letterSpacing: 2 },

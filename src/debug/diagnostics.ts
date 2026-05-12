@@ -19,6 +19,7 @@ let drawBufW = 0;
 let drawBufH = 0;
 let sceneObjects = 0;
 let lastRenderError: string | null = null;
+let firstLoadError: string | null = null;
 
 const listeners = new Set<() => void>();
 
@@ -36,6 +37,7 @@ export interface DiagSnapshot {
   drawBufH: number;
   sceneObjects: number;
   lastRenderError: string | null;
+  firstLoadError: string | null;
 }
 
 export const Diag = {
@@ -62,8 +64,22 @@ export const Diag = {
     if (lastRenderError === null) return;
     lastRenderError = null; notify();
   },
+  // First load failure is sticky -- once captured, we keep showing it so
+  // you can see the original cause even after later loads also fail.
+  // Subsequent calls only overwrite if firstLoadError is still null.
+  setLoadError(label: string, err: unknown): void {
+    if (firstLoadError !== null) return;
+    const msg = (err as Error)?.message ?? String(err);
+    const stack = (err as Error)?.stack?.split('\n').slice(0, 3).join(' | ') ?? '';
+    firstLoadError = `${label}: ${msg}${stack ? ` :: ${stack}` : ''}`;
+    notify();
+  },
+  clearLoadError(): void {
+    if (firstLoadError === null) return;
+    firstLoadError = null; notify();
+  },
   snapshot(): DiagSnapshot {
-    return { modelsAttempted, modelsLoaded, frames, drawBufW, drawBufH, sceneObjects, lastRenderError };
+    return { modelsAttempted, modelsLoaded, frames, drawBufW, drawBufH, sceneObjects, lastRenderError, firstLoadError };
   },
   subscribe(fn: () => void): () => void {
     listeners.add(fn);

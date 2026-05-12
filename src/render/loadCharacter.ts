@@ -16,9 +16,6 @@ const cache: Partial<Record<CharacterId, Group>> = {};
 const loading: Partial<Record<CharacterId, Promise<Group>>> = {};
 
 async function fetchBuffer(uri: string): Promise<ArrayBuffer> {
-  // fetch() of file:// URIs is unreliable on Android (empty body / hangs).
-  // Read via expo-file-system as base64, then decode to ArrayBuffer using
-  // Hermes' global atob.
   const b64 = await FileSystem.readAsStringAsync(uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
@@ -28,16 +25,11 @@ async function fetchBuffer(uri: string): Promise<ArrayBuffer> {
   return bytes.buffer;
 }
 
-// Remove `images[i].uri` entries from the GLB's JSON header so GLTFLoader
-// doesn't try to fetch missing relative URIs (which would either error or
-// hang). Returns a new ArrayBuffer with the patched JSON; the binary chunk
-// is copied through unchanged.
 function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
   const view = new DataView(buffer);
-  if (view.getUint32(0, true) !== 0x46546c67) return buffer; // not a GLB; pass through
+  if (view.getUint32(0, true) !== 0x46546c67) return buffer;
   const totalLen = view.getUint32(8, true);
   const jsonLen = view.getUint32(12, true);
-  // 12-byte header, 4-byte json-length, 4-byte json-type
   const jsonStart = 20;
   const jsonBytes = new Uint8Array(buffer, jsonStart, jsonLen);
   const jsonStr = new TextDecoder().decode(jsonBytes);
@@ -68,16 +60,12 @@ function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
   outView.setUint32(4, 2, true);
   outView.setUint32(8, newTotal, true);
   outView.setUint32(12, newJsonBytes.length, true);
-  outView.setUint32(16, 0x4e4f534a, true); // 'JSON'
+  outView.setUint32(16, 0x4e4f534a, true);
   out.set(newJsonBytes, 20);
   out.set(binBytes, 20 + newJsonBytes.length);
   return out.buffer;
 }
 
-// Bake per-vertex colors into every mesh in the scene by sampling the
-// character's palette PNG at each vertex's UV. Then replace the material
-// with MeshBasicMaterial(vertexColors=true) so no GPU texture is ever
-// uploaded. See bug #6 of docs/glb-render-pipeline.md.
 function bakeVertexColors(scene: Group, sampler: PaletteSampler): void {
   scene.traverse((node: any) => {
     if (!node.isMesh || !node.geometry) return;
@@ -118,22 +106,6 @@ async function loadOnce(id: CharacterId): Promise<Group> {
     loader.parse(patched, '', resolve, reject);
   });
 
-  // CRITICAL: null every texture slot on every parsed material BEFORE the
-  // scene reaches the renderer. GLTFLoader creates THREE.Texture instances
-  // pointing at the GLB's internal images, but in React Native there's no
-  // Image constructor so those textures' .image stays undefined. The
-  // renderer's compile/upload path runs before any later .map swap and
-  // crashes in getDimensions() on image.width. Nulling these refs first
-  // means even if our own texture attach below fails, the scene is still
-  // safe to render.
-  //
-  // We also disable frustumCulled per bug #9 of glb-render-pipeline.md:
-  // after scaling/centering, a mesh's boundingSphere can end up degenerate
-  // and three's culler then decides "off-screen" every frame, silently
-  // hiding the mesh. For small scenes culling buys nothing.
-  //
-  // Recompute boundingBox + boundingSphere after stripping so any later
-  // transforms operate on fresh bounds.
   const textureKeys = [
     'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap',
     'emissiveMap', 'bumpMap', 'displacementMap', 'alphaMap',
@@ -161,7 +133,6 @@ async function loadOnce(id: CharacterId): Promise<Group> {
     }
   });
 
-  // Bake vertex colors from this character's palette PNG.
   try {
     const palette = await getPaletteSampler(CHARACTER_TEX[id]);
     bakeVertexColors(gltf.scene, palette);
@@ -179,12 +150,17 @@ export async function loadCharacter(id: CharacterId): Promise<Object3D> {
     return cache[id]!.clone(true);
   }
   if (!loading[id]) {
-    loading[id] = loading[id] = loadOnce(id).then((s) => {
+    loading[id] = loadOnce(id).then((s) => {
       cache[id] = s;
       return s;
     });
   }
-  const s = await loading[id]!;
-  Diag.loadModel();
-  return s.clone(true);
+  try {
+    const s = await loading[id]!;
+    Diag.loadModel();
+    return s.clone(true);
+  } catch (err) {
+    Diag.setLoadError(`character ${id}`, err);
+    throw err;
+  }
 }
