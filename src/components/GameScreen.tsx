@@ -31,9 +31,12 @@ const MARGIN = 24;
 
 const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
 
-const CAM_OFFSET_X = 640;
-const CAM_HEIGHT = 1280;
-const CAM_OFFSET_Z = 640;
+// Pure top-down camera. Setting CAM_OFFSET_X and CAM_OFFSET_Z to 0 puts
+// the camera directly over the car (no isometric tilt). CAM_HEIGHT
+// controls how zoomed-in we are; lower = closer.
+const CAM_OFFSET_X = 0;
+const CAM_HEIGHT = 900;
+const CAM_OFFSET_Z = 0;
 const CAM_FOV = 50;
 
 const CAMERA_CONFIG = {
