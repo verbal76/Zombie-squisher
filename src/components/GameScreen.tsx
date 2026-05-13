@@ -61,13 +61,48 @@ const STICK_MAX_OFFSET = WHEEL_SIZE / 2 - STICK_KNOB_SIZE / 2 - 4;
 const STICK_GRAB_RADIUS = WHEEL_SIZE / 2 + 24;
 const CONTROL_OVERLAY_H = Math.max(WHEEL_SIZE, CLUSTER_H) + MARGIN * 2;
 
+const AUTO_FIRE_FOR_TESTING = true;
+
+// Reverse engagement requires a deliberate stick-down within a narrow cone
+// of straight-down, with a minimum magnitude. Sideways/diagonal stick is
+// pure steering and produces zero throttle, so the player can carve turns
+// without accidentally braking.
+const REVERSE_GATE_DEGREES = 30;
+const REVERSE_MIN_PULL = 0.25;
+const STICK_CENTER_DEADZONE = 0.15;
+
+function throttleAxisFromStick(cx: number, cy: number): number {
+  const nx = Math.max(-1, Math.min(1, cx / STICK_MAX_OFFSET));
+  const ny = Math.max(-1, Math.min(1, cy / STICK_MAX_OFFSET));
+  const magnitude = Math.min(1, Math.hypot(nx, ny));
+
+  if (magnitude < STICK_CENTER_DEADZONE) return 0;
+
+  // Stick up (ny < 0) is forward throttle. Magnitude is the Y component so
+  // diagonal pushes still throttle, just at reduced gain.
+  if (ny < 0) {
+    return Math.min(1, -ny);
+  }
+
+  // Stick down: only engage brake/reverse when the player aims for it. Must
+  // be within a narrow cone of straight-down AND past the minimum pull.
+  const angleFromDownDegrees = Math.abs(Math.atan2(nx, ny)) * 180 / Math.PI;
+  const insideReverseGate = angleFromDownDegrees <= REVERSE_GATE_DEGREES;
+
+  if (insideReverseGate && magnitude >= REVERSE_MIN_PULL) {
+    return -Math.min(1, ny);
+  }
+
+  return 0;
+}
+
 export function GameScreen({ progress, onEnd }: Props) {
   const worldRef = useRef<World>(createWorld(ARENA_W, ARENA_H, progress));
   const wheelRef = useRef(0);
   // Single-stick throttle axis. Positive = forward throttle, negative = brake/reverse.
   // Magnitude (0..1) is proportional to how far the stick is pushed.
   const throttleAxisRef = useRef(0);
-  const fireRef = useRef(false);
+  const fireRef = useRef(AUTO_FIRE_FOR_TESTING);
   const abilityTriggerRef = useRef(false);
   const [, setTick] = useState(0);
   const [exited, setExited] = useState(false);
@@ -89,7 +124,7 @@ export function GameScreen({ progress, onEnd }: Props) {
       step(w, dt, {
         wheel: wheelRef.current,
         throttleAxis: throttleAxisRef.current,
-        fire: fireRef.current,
+        fire: AUTO_FIRE_FOR_TESTING || fireRef.current,
         triggerAbility: abilityTriggerRef.current,
       }, progress);
       abilityTriggerRef.current = false;
@@ -146,10 +181,7 @@ export function GameScreen({ progress, onEnd }: Props) {
           }
           stickRef.current?.setKnob(cx, cy);
           wheelRef.current = Math.max(-1, Math.min(1, cx / STICK_MAX_OFFSET));
-          // Stick UP on the screen is negative Y. Throttle axis is positive
-          // when pushing up (forward throttle) and negative when pulling
-          // down (brake/reverse).
-          throttleAxisRef.current = Math.max(-1, Math.min(1, -cy / STICK_MAX_OFFSET));
+          throttleAxisRef.current = throttleAxisFromStick(cx, cy);
           stickFound = true;
           continue;
         }
@@ -168,14 +200,14 @@ export function GameScreen({ progress, onEnd }: Props) {
       throttleAxisRef.current = 0;
     }
 
-    fireRef.current = fire;
+    fireRef.current = AUTO_FIRE_FOR_TESTING || fire;
   };
 
   const releaseAllControls = () => {
     stickRef.current?.springHome();
     wheelRef.current = 0;
     throttleAxisRef.current = 0;
-    fireRef.current = false;
+    fireRef.current = AUTO_FIRE_FOR_TESTING;
   };
 
   const dbgCar = `car (${w.carX.toFixed(0)}, ${w.carY.toFixed(0)})  hd=${w.heading.toFixed(2)}  v=${w.forwardV.toFixed(0)}`;
@@ -272,7 +304,7 @@ export function GameScreen({ progress, onEnd }: Props) {
           }}
         >
           <View style={[styles.btn, styles.btnFire, { left: BTN_FIRE_X, top: BTN_FIRE_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
-            <Text style={styles.btnText}>FIRE</Text>
+            <Text style={styles.btnText}>{AUTO_FIRE_FOR_TESTING ? 'AUTO' : 'FIRE'}</Text>
           </View>
         </View>
       </View>
