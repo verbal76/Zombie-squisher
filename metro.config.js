@@ -13,6 +13,9 @@
 // Bump 2026-05-12: trigger APK so the GLB-JSON full-texture-strip fix
 // (fb0b25d) ships embedded -- devices without the latest OTA will still
 // load Kenney vehicle/character meshes correctly.
+// Bump 2026-05-13: trigger APK so the bicycle-model steering rewrite
+// ships embedded -- so day-one launches drive like a car, not a sliding
+// sprite, without depending on the OTA reaching the device.
 
 const { getDefaultConfig } = require('expo/metro-config');
 
