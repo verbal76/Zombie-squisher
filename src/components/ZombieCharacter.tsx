@@ -7,10 +7,9 @@ import { pickCharacterIdForZombie } from '../assets/characters';
 import { loadCharacter } from '../render/loadCharacter';
 
 // World-unit scale we render Kenney models at. Kenney characters are ~2
-// units tall in local frame. At BASE_SCALE = 24, walkers render at ~48
-// units tall -- slightly taller than the typical car (~40 units tall
-// after fitScaleFor).
-const BASE_SCALE = 24;
+// units tall in local frame. BASE_SCALE = 12 -> walkers ~24 units tall.
+// (Last value was 24 -- too big. Halved per request.)
+const BASE_SCALE = 12;
 const BOSS_SCALE = BASE_SCALE * 1.75;
 
 interface Props {
@@ -50,8 +49,8 @@ export function ZombieCharacter({ z }: Props) {
   if (!model) {
     // Box fallback while async loading or if load fails. Heights match
     // the GLB scale so both render consistently on the ground.
-    const side = z.size * 4;
-    const height = isBoss ? 84 : 48;
+    const side = z.size * 2;
+    const height = isBoss ? 42 : 24;
     return (
       <mesh ref={groupRef} position={[z.x, height / 2, z.y]}>
         <boxGeometry args={[side, height, side]} />
