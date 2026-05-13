@@ -40,13 +40,19 @@ const CAMERA_CONFIG = {
 
 const HUD_TICK_MS = 100;
 
+// === Button layout ===
+//   bottom-left:   [ ◀ LEFT ] [ F ]
+//   right column:   [ TURBO ]                       (stacked above the RIGHT arrow)
+//                  [ R ] [ ▶ RIGHT ]
 const ARROW_BTN_SIZE = 88;
 const MID_BTN_SIZE   = 68;
 const INTRA_CLUSTER_GAP = 14;
+const INTRA_VERTICAL_GAP = 12; // vertical gap between TURBO and the right-arrow it sits above
 const EDGE_MARGIN = 16;
 const BUTTON_ROW_BOTTOM = 22;
 const BUTTON_ROW_HITSLOP = 22;
-const CONTROL_OVERLAY_H = ARROW_BTN_SIZE + BUTTON_ROW_BOTTOM * 2;
+// Container extends taller to accommodate the TURBO stacked above the bottom row.
+const CONTROL_OVERLAY_H = ARROW_BTN_SIZE + MID_BTN_SIZE + INTRA_VERTICAL_GAP + BUTTON_ROW_BOTTOM * 2;
 
 type TouchKind = 'steerLeft' | 'steerRight' | 'gearForward' | 'gearReverse' | 'turbo';
 interface TouchState { kind: TouchKind; }
@@ -55,10 +61,6 @@ const HOLD_KINDS = new Set<TouchKind>(['steerLeft', 'steerRight', 'turbo']);
 const TAP_KINDS  = new Set<TouchKind>(['gearForward', 'gearReverse']);
 
 // === Static horizon buildings ===
-// Generated once at module load. Positions are RELATIVE to the player car;
-// the Horizon component renders them as children of a group that follows
-// the car each frame, so the skyline is always at the same angular
-// position around the player ("infinite city on the horizon").
 const HORIZON_BUILDING_COUNT = 56;
 const HORIZON_MIN_DIST = 1800;
 const HORIZON_MAX_DIST = 2600;
@@ -78,8 +80,6 @@ interface HorizonBuilding {
 
 const HORIZON_BUILDINGS: HorizonBuilding[] = (() => {
   const out: HorizonBuilding[] = [];
-  // Seeded-feeling pseudo-random so the skyline looks intentional but
-  // varied. Two rings at slightly different radii gives depth.
   for (let i = 0; i < HORIZON_BUILDING_COUNT; i++) {
     const angle = (i / HORIZON_BUILDING_COUNT) * Math.PI * 2 + (Math.random() - 0.5) * 0.20;
     const dist = HORIZON_MIN_DIST + Math.random() * (HORIZON_MAX_DIST - HORIZON_MIN_DIST);
@@ -113,20 +113,27 @@ export function GameScreen({ progress, onEnd }: Props) {
 
   const { width: sw, height: sh } = useWindowDimensions();
 
+  // Bottom row Y (arrows + F + R all share this row's center).
   const rowCenterY = sh - BUTTON_ROW_BOTTOM - ARROW_BTN_SIZE / 2;
   const arrowY = rowCenterY - ARROW_BTN_SIZE / 2;
   const midY   = rowCenterY - MID_BTN_SIZE / 2;
 
+  // Bottom-left cluster.
   const leftArrowX = EDGE_MARGIN;
   const fwdBtnX    = EDGE_MARGIN + ARROW_BTN_SIZE + INTRA_CLUSTER_GAP;
+
+  // Bottom-right cluster.
   const rightArrowX = sw - EDGE_MARGIN - ARROW_BTN_SIZE;
   const revBtnX     = sw - EDGE_MARGIN - ARROW_BTN_SIZE - INTRA_CLUSTER_GAP - MID_BTN_SIZE;
-  const turboX = (sw - MID_BTN_SIZE) / 2;
+
+  // TURBO: sits directly ABOVE the right arrow, horizontally centered to it.
+  const turboX = rightArrowX + (ARROW_BTN_SIZE - MID_BTN_SIZE) / 2;
+  const turboY = arrowY - INTRA_VERTICAL_GAP - MID_BTN_SIZE;
 
   const btnLayouts: { kind: TouchKind; x: number; y: number; w: number; h: number }[] = [
     { kind: 'steerLeft',   x: leftArrowX,  y: arrowY, w: ARROW_BTN_SIZE, h: ARROW_BTN_SIZE },
     { kind: 'gearForward', x: fwdBtnX,     y: midY,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
-    { kind: 'turbo',       x: turboX,      y: midY,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
+    { kind: 'turbo',       x: turboX,      y: turboY, w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
     { kind: 'gearReverse', x: revBtnX,     y: midY,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
     { kind: 'steerRight',  x: rightArrowX, y: arrowY, w: ARROW_BTN_SIZE, h: ARROW_BTN_SIZE },
   ];
@@ -409,12 +416,6 @@ function GrassGround({ world }: { world: World }) {
   );
 }
 
-// === Horizon: distant building ring that follows the car ===
-// The group's position tracks the car each frame, so the buildings sit
-// at fixed angular positions relative to the player -- creating the
-// illusion of an infinite city on the horizon as you drive. They're
-// far enough out (~1800-2600 units) that the player can't reach them,
-// and they have no collision (just visual decoration).
 function Horizon({ world }: { world: World }) {
   const groupRef = useRef<any>(null);
   useFrame(() => {

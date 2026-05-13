@@ -11,19 +11,13 @@ export interface World {
   height: number;
   carX: number;
   carY: number;
-  /** Heading in radians. 0 = facing toward -Y, up the screen. */
   heading: number;
-  /** Forward speed scalar in heading direction. Negative = reversing. */
   forwardV: number;
-  /** Vestigial: kept for runtime/save shape compat. */
   brakeHoldTimer: number;
   carVx: number;
   carVy: number;
-  /** Smoothed steer input -1..1 for body roll. Does NOT feed the steering force. */
   steeringAngle: number;
-  /** Instantaneous heading turn rate (rad/s) for the current tick. */
   angularVelocity: number;
-  /** Last gear input processed -- used to detect transmission-jam direction flips. */
   lastGear: GearState;
   scroll: number;
   speed: number;
@@ -55,9 +49,12 @@ export type StreakBannerKind = 'spree' | 'reaper' | 'breaker' | 'apocalypse' | n
 export const KILL_SPEED = 50;
 
 // Streak threshold at which zombies switch from chase mode to flee mode.
-// 10 matches the 'spree' banner -- once the player is on a real streak,
-// the horde panics and runs away.
 export const ZOMBIE_FLEE_STREAK = 10;
+
+// Hard cap on active zombies. With the 100x spawn rate (per request) the
+// world fills up fast; capping prevents unbounded growth that would tank
+// performance. 500 lets the horde feel dense without crashing the render.
+export const MAX_ACTIVE_ZOMBIES = 500;
 
 export const TUNING = {
   ZOMBIE_MOVE_LERP_K: 3.0,
@@ -281,11 +278,19 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
   const bumperBonus = isNitro ? 2 : 1;
 
+  // === Spawn rate ===
+  // Per request: 100x previous spawn rate. The previous formula gave
+  // spawnEvery = max(0.08, 1.2 - wave*0.05). Now divided by 100 with
+  // a slightly larger floor (0.008 s) so the loop stays bounded even
+  // at high waves. The MAX_ACTIVE_ZOMBIES cap prevents unbounded
+  // growth when the player can't kill them fast enough.
   world.spawnTimer -= dt;
-  const spawnEvery = Math.max(0.08, 1.2 - world.wave * 0.05);
+  const spawnEvery = Math.max(0.008, (1.2 - world.wave * 0.05) / 100);
 
   while (world.spawnTimer <= 0) {
-    spawnZombie(world, false);
+    if (world.zombies.length < MAX_ACTIVE_ZOMBIES) {
+      spawnZombie(world, false);
+    }
     world.spawnTimer += spawnEvery;
   }
 
@@ -512,16 +517,6 @@ function spawnBlood(world: World, z: Zombie): void {
   }
 }
 
-// Zombie movement intent (-N..+N). Multiplies def.speed when computing each
-// zombie's velocity target. Positive = move toward the car, negative = away.
-//
-// Streak-aware behavior (per request: "consistently going after the car,
-// unless on a streak then they should run from the car"):
-//   streak >= ZOMBIE_FLEE_STREAK (10): all zombies flee at -1.1 (slightly
-//     panicked, faster than their normal chase speed).
-//   otherwise: all kinds chase. Per-kind speed differences come from
-//     def.speed in zombies.ts -- runners are faster, brutes slower, etc.
-//     No kiting/retreating subroutines anymore (used to be in spitter).
 function intentFor(z: Zombie, dst: number, streak: number): number {
   if (streak >= ZOMBIE_FLEE_STREAK) {
     return -1.1;
