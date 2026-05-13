@@ -1,18 +1,12 @@
-// Metro config — enables full package.json `exports` field resolution so
-// modern ESM-only deps (three.js 0.150+) bundle correctly.
-//
-// Also registers .glb / .gltf as bundled asset extensions.
-//
-// Bump history (build triggers):
-//   2026-05-10 / driving overhaul slice (build #45)
-//   2026-05-11..13 / various engine, control, and physics pushes
-//   2026-05-13j: camera lookahead + live physics debug HUD
-//   2026-05-13k: FRZ-STYLE 5-BUTTON CONTROL SCHEME
-//     [<-] [F] [TURBO] [R] [->] across the bottom. Auto-fire always on
-//     (Vampire-Survivors-style). Joystick + throttleAxis pipeline removed.
-//     New engine inputs: steerLeft, steerRight, gear (forward|reverse|
-//     neutral), turbo. Slamming F<->R while moving fast triggers a
-//     transmission jam: BRAKE_K decel + lateral skid injection.
+// Metro config — bump only to fire android-build alongside eas-update.
+// Bump history collapsed; latest:
+//   2026-05-13l: chase cam (NFS-style behind-the-car view). Camera sits
+//   ~110 units behind the car at ~65 units height, looks ~150 units
+//   ahead. Camera-tracked heading lerps toward world.heading at 4/sec
+//   so turns swing the view smoothly. Replaces the pure top-down
+//   camera. FOV bumped to 65 for chase-cam peripheral visibility. Sky
+//   color changed from greenish to bluish since the camera now sees
+//   the horizon.
 
 const { getDefaultConfig } = require('expo/metro-config');
 

@@ -25,13 +25,20 @@ const CAR_LIFT = 1;
 
 const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
 
-const CAM_OFFSET_X = 0;
-const CAM_HEIGHT = 900;
-const CAM_OFFSET_Z = 0;
-const CAM_FOV = 50;
+// === Chase cam (NFS-style behind-the-car view) ===
+// Camera sits behind the car along its heading, raised by CHASE_HEIGHT,
+// looking at a point CHASE_LOOK_AHEAD units in front of the car. Camera
+// heading lerps toward world.heading at CHASE_HEADING_K per second so
+// sharp turns don't snap the view -- the car visibly rotates on screen
+// for a beat before the camera swings around behind it.
+const CHASE_DISTANCE   = 110;
+const CHASE_HEIGHT     = 65;
+const CHASE_LOOK_AHEAD = 150;
+const CHASE_HEADING_K  = 4.0;
+const CAM_FOV = 65;  // wider than top-down (was 50) so peripheral terrain reads
 
 const CAMERA_CONFIG = {
-  position: [ARENA_W / 2 + CAM_OFFSET_X, CAM_HEIGHT, ARENA_H / 2 + CAM_OFFSET_Z] as [number, number, number],
+  position: [ARENA_W / 2, CHASE_HEIGHT, ARENA_H / 2 + CHASE_DISTANCE] as [number, number, number],
   fov: CAM_FOV,
   near: 1,
   far: 6000,
@@ -73,9 +80,6 @@ export function GameScreen({ progress, onEnd }: Props) {
   const vehicle = VEHICLES[progress.selectedVehicle];
   const ability = ABILITIES[progress.selectedAbility];
 
-  // useWindowDimensions subscribes to dimension changes so the layout
-  // recomputes on rotation (and the button hit-areas stay in sync with
-  // the rendered button positions).
   const { width: sw, height: sh } = useWindowDimensions();
 
   const rowStartX = (sw - BUTTON_ROW_TOTAL_W) / 2;
@@ -105,7 +109,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         steerRight: steerRightRef.current,
         gear:       gearRef.current,
         turbo:      turboRef.current,
-        fire:       true,  // Auto-fire (Vampire-Survivors-style); no FIRE button on screen.
+        fire:       true,
         triggerAbility: abilityTriggerRef.current,
       }, progress);
       abilityTriggerRef.current = false;
@@ -198,7 +202,6 @@ export function GameScreen({ progress, onEnd }: Props) {
     touchesRef.current.clear();
   }
 
-  // === Live physics debug HUD lines ===
   const _sH = Math.sin(w.heading);
   const _cH = Math.cos(w.heading);
   const _vL = w.carVx * _cH + w.carVy * _sH;
@@ -214,7 +217,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         camera={CAMERA_CONFIG}
       >
         <FrameProbe />
-        <color attach="background" args={['#3a4a2e']} />
+        <color attach="background" args={['#88a0cc']} />
         <ambientLight intensity={0.85} />
         <directionalLight position={[400, 600, 200]} intensity={0.6} />
 
@@ -366,27 +369,31 @@ function GrassGround({ world }: { world: World }) {
 }
 
 const CAM_REFERENCE_LENGTH = 80;
-const CAM_LOOKAHEAD = 0.18;
-const CAM_FOLLOW_K = 4.0;
 
+// === Chase cam tracker ===
+// Camera sits behind the car along a SMOOTHED heading and looks at a point
+// ahead of the car. The chase distance + height scale by per-vehicle zoom
+// (bigger vehicles -> camera pulled back further) and by boss-zoom when a
+// large enemy is on screen.
 function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const zoomState = useRef<number>(1.0);
   const zoomInit = useRef(false);
-  const focalX = useRef(0);
-  const focalY = useRef(0);
-  const focalInit = useRef(false);
+  const cameraHeading = useRef<number>(0);
+  const cameraHeadingInit = useRef(false);
   const vehicleZoom = Math.max(0.85, vehicle.height / CAM_REFERENCE_LENGTH);
+
   useFrame((state, dt) => {
     if (!zoomInit.current) {
       zoomState.current = vehicleZoom;
       zoomInit.current = true;
     }
-    if (!focalInit.current) {
-      focalX.current = world.carX;
-      focalY.current = world.carY;
-      focalInit.current = true;
+    if (!cameraHeadingInit.current) {
+      cameraHeading.current = world.heading;
+      cameraHeadingInit.current = true;
     }
 
+    // Boss/size-aware zoom (pulls chase distance + height back when something
+    // big is on screen, so the player can see what's incoming).
     let maxNearbySize = 0;
     const rSq = TUNING.ZOOM_CONSIDERATION_RADIUS * TUNING.ZOOM_CONSIDERATION_RADIUS;
     for (const z of world.zombies) {
@@ -403,21 +410,41 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     zoomState.current += (targetZoom - zoomState.current) * zoomAlpha;
     const zoom = zoomState.current;
 
-    const targetFocalX = world.carX + world.carVx * CAM_LOOKAHEAD;
-    const targetFocalY = world.carY + world.carVy * CAM_LOOKAHEAD;
-    const focalAlpha = 1 - Math.exp(-CAM_FOLLOW_K * dt);
-    focalX.current += (targetFocalX - focalX.current) * focalAlpha;
-    focalY.current += (targetFocalY - focalY.current) * focalAlpha;
+    // Smooth the camera-tracked heading toward the car's heading. Lerping the
+    // SHORT way around the circle prevents the camera from spinning the long
+    // way after a heading wrap. CHASE_HEADING_K = 4/sec -> ~0.17 s half-life.
+    let dh = world.heading - cameraHeading.current;
+    while (dh > Math.PI) dh -= 2 * Math.PI;
+    while (dh < -Math.PI) dh += 2 * Math.PI;
+    const hAlpha = 1 - Math.exp(-CHASE_HEADING_K * dt);
+    cameraHeading.current += dh * hAlpha;
+
+    // Forward unit vector in three.js (X, Z) at the camera's tracked heading.
+    // Convention: heading=0 -> car faces -Z (i.e., world.carY decreasing).
+    //   fwd = (sin(H), -cos(H)) in (X, Z)
+    const camS = Math.sin(cameraHeading.current);
+    const camC = Math.cos(cameraHeading.current);
+    const fwdX = camS;
+    const fwdZ = -camC;
+
+    // Camera position: behind the car along its heading, raised by CHASE_HEIGHT.
+    // Chase distance + height scale with zoom (bigger vehicle or boss zoom
+    // pulls the camera back so the whole scene reads).
+    const camX = world.carX - fwdX * CHASE_DISTANCE * zoom;
+    const camZ = world.carY - fwdZ * CHASE_DISTANCE * zoom;
+    const camY = CHASE_HEIGHT * zoom;
+
+    // LookAt point: ahead of the car along its heading. This biases the
+    // visible area toward incoming terrain / zombies rather than centering
+    // on the car itself.
+    const lookX = world.carX + fwdX * CHASE_LOOK_AHEAD;
+    const lookZ = world.carY + fwdZ * CHASE_LOOK_AHEAD;
 
     const sx = (Math.random() - 0.5) * world.shake * 3;
     const sz = (Math.random() - 0.5) * world.shake * 3;
 
-    state.camera.position.set(
-      focalX.current + sx,
-      CAM_HEIGHT * zoom,
-      focalY.current + sz,
-    );
-    state.camera.lookAt(focalX.current, 0, focalY.current);
+    state.camera.position.set(camX + sx, camY, camZ + sz);
+    state.camera.lookAt(lookX, 0, lookZ);
   });
   return null;
 }
