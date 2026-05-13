@@ -17,11 +17,11 @@ export const DEFAULT_PROGRESS: Progress = {
   totalKills: 0,
   bestRunKills: 0,
   unlockedVehicles: ['hatchback'],
-  unlockedWeapons: ['none'],
+  unlockedWeapons: ['none', 'mg'],
   unlockedAbilities: ['none'],
   unlockedSideMods: ['none'],
   selectedVehicle: 'hatchback',
-  selectedWeapon: 'none',
+  selectedWeapon: 'mg',
   selectedAbility: 'none',
   selectedSideMod: 'none',
   upgrades: allUpgrades,
@@ -31,20 +31,33 @@ export async function loadProgress(): Promise<Progress> {
   try {
     const raw = await AsyncStorage.getItem(KEY);
     if (!raw) return clone(DEFAULT_PROGRESS);
+
     const parsed = JSON.parse(raw) as Partial<Progress>;
-    // Backfill any per-vehicle upgrade fields the saved object lacks. Saves
-    // from before a field was added (e.g. acceleration) would otherwise leave
-    // that field undefined and the engine math would produce NaN.
+
     const backfilledUpgrades: Record<VehicleId, UpgradeStats> = VEHICLE_LIST.reduce((acc, v) => {
       acc[v.id] = { ...ZERO, ...(parsed.upgrades?.[v.id] ?? {}) };
       return acc;
     }, {} as Record<VehicleId, UpgradeStats>);
+
     const merged: Progress = {
       ...DEFAULT_PROGRESS,
       ...parsed,
       upgrades: backfilledUpgrades,
     };
-    if (!VEHICLES[merged.selectedVehicle]) merged.selectedVehicle = 'hatchback';
+
+    if (!VEHICLES[merged.selectedVehicle]) {
+      merged.selectedVehicle = 'hatchback';
+    }
+
+    const unlockedWeapons = new Set<WeaponId>(merged.unlockedWeapons);
+    unlockedWeapons.add('none');
+    unlockedWeapons.add('mg');
+    merged.unlockedWeapons = Array.from(unlockedWeapons);
+
+    if (!WEAPONS[merged.selectedWeapon] || merged.selectedWeapon === 'none') {
+      merged.selectedWeapon = 'mg';
+    }
+
     return merged;
   } catch {
     return clone(DEFAULT_PROGRESS);
@@ -60,18 +73,22 @@ export async function saveProgress(p: Progress): Promise<void> {
 export function applyKills(p: Progress, kills: number): Progress {
   const totalKills = p.totalKills + kills;
   const bestRunKills = Math.max(p.bestRunKills, kills);
+
   const unlockedWeapons = new Set(p.unlockedWeapons);
   for (const w of Object.values(WEAPONS)) {
     if (totalKills >= w.unlockKills) unlockedWeapons.add(w.id as WeaponId);
   }
+
   const unlockedAbilities = new Set(p.unlockedAbilities);
   for (const a of Object.values(ABILITIES)) {
     if (totalKills >= a.unlockKills) unlockedAbilities.add(a.id as AbilityId);
   }
+
   const unlockedSideMods = new Set(p.unlockedSideMods);
   for (const s of Object.values(SIDE_MODS)) {
     if (totalKills >= s.unlockKills) unlockedSideMods.add(s.id as SideModId);
   }
+
   return {
     ...p,
     totalKills,
@@ -87,6 +104,7 @@ export function buyVehicle(p: Progress, id: VehicleId): Progress | null {
   if (!v) return null;
   if (p.unlockedVehicles.includes(id)) return null;
   if (p.totalKills < v.killCost) return null;
+
   return {
     ...p,
     totalKills: p.totalKills - v.killCost,
@@ -108,6 +126,7 @@ export function buyUpgrade(p: Progress, id: VehicleId, stat: keyof UpgradeStats)
   const cost = upgradeCost(cur);
   if (cost === null) return null;
   if (p.totalKills < cost) return null;
+
   return {
     ...p,
     totalKills: p.totalKills - cost,
