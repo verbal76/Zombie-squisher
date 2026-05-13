@@ -204,16 +204,14 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const REVERSE_HOLD_SECONDS = 1.0;             // longer hold before brake engages reverse
   const REVERSE_ACCEL_FACTOR = 0.5;             // reverse is torque-limited, slower than forward
 
-  // Traction-based car model (kinematic bicycle):
-  //   - Heading change is derived from forward velocity + steering angle via
-  //     ω = (vF / wheelbase) · tan(δ). The car CANNOT rotate at v=0 — no
-  //     more sprite-on-ice spinning.
-  //   - Max steering angle shrinks with speed (~35° at standstill → ~10° at
-  //     top speed) so high-speed turning is a smooth carve, not a twitch.
-  //   - Lateral velocity (vR) decays nearly to zero per tick → the velocity
-  //     vector tracks the heading instead of sliding sideways.
-  //   - The car pivots around its rear axle (tracked internally), so the
-  //     turning arc matches a real wheelbase rather than spinning in place.
+  // Mario-Kart-style car model:
+  //   - Heading turn rate is stick-driven directly, scaled by speed.
+  //     Activation gate at v=0 means stationary stick input does NOT rotate
+  //     the car (no spinning sprite). Above v=0 the car turns at a tight,
+  //     responsive rate.
+  //   - NO lateral velocity. Position is always vF along the heading — no
+  //     slip, no drift, no sliding sideways during turns. The velocity vector
+  //     is locked to the nose.
   //   - Brake → reverse is a 3-phase progression: braking force, near-stop
   //     hold, then reverse engagement after 1 s of holding brake at zero.
   //   - Forward acceleration curve is nonlinear (torque-strong at launch,
@@ -266,67 +264,42 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     world.brakeHoldTimer = 0;
   }
 
-  // --- Bicycle steering model ---
-  // Wheelbase: distance between front and rear axles. Approximated as 62 %
-  // of vehicle length (vehicle.height in top-down coords). Stronger handling
-  // upgrades nudge the wheelbase shorter, tightening turn radius slightly.
-  const handlingFrac = Math.min(1.5, stats.handling / 100);
-  const wheelbase = Math.max(20, vehicle.height * 0.62 / handlingFrac);
-
-  // Speed-sensitive max steering angle. At standstill the front wheels can
-  // crank to ~33°; at top speed they're limited to ~9° — so the same stick
-  // input arcs gently instead of snapping the nose around.
-  const ABS_MAX_STEER = 0.58;
-  const HIGH_SPEED_STEER_SCALE = 0.28;
-  const speedFrac = Math.min(1, Math.abs(vF) / Math.max(1, stats.speed));
-  const dynamicMaxSteer = ABS_MAX_STEER * (1 - (1 - HIGH_SPEED_STEER_SCALE) * speedFrac);
-
-  // Apply a small deadzone so a near-centered stick doesn't drift the wheels.
+  // --- Mario-Kart steering ---
+  // Deadzone so a near-centered stick doesn't twitch the wheels.
   const rawWheel = Math.abs(input.wheel) < 0.06 ? 0 : input.wheel;
 
-  // Flip stick when reversing so right-stick keeps meaning right-turn (arcade convention).
-  const steerSign = vF >= 0 ? 1 : -1;
-  const targetDelta = rawWheel * dynamicMaxSteer * steerSign;
+  // Mirror stick into world.steeringAngle for the body-roll animation in
+  // CarMesh (which reads world.steeringAngle * speedNorm * 0.18 for tilt).
+  const wheelLerp = 1 - Math.pow(0.08, dt);
+  world.steeringAngle += (rawWheel - world.steeringAngle) * wheelLerp;
 
-  // Wheel inertia: smooth toward the target steering angle. ~0.18 retain/sec
-  // (~0.4 s half-life) — the wheel responds promptly but not instantly.
-  const steerLerp = 1 - Math.pow(0.18, dt);
-  world.steeringAngle += (targetDelta - world.steeringAngle) * steerLerp;
-  const delta = world.steeringAngle;
+  // Activation gate: at v=0 the car cannot rotate. The gate ramps from 0
+  // at standstill up to 1 at TURN_ACTIVATION_SPEED so the car can pivot
+  // off the line but cannot spin in place like a sprite.
+  const TURN_ACTIVATION_SPEED = 25;
+  const turnActivation = Math.min(1, Math.abs(vF) / TURN_ACTIVATION_SPEED);
 
-  // Strong lateral grip. vR (sideways velocity) decays nearly to zero each
-  // tick — kills the "rotating sprite on ice" feel. A small amount of slip
-  // is allowed at high speed for character (and to absorb collision impulses).
-  const gripRetain = 0.001 + 0.05 * speedFrac;
-  vR *= Math.pow(gripRetain, dt);
+  // Speed-scaled turn rate: tight at low speed, slightly looser at top so
+  // the car can carve fast turns without rolling the heading aggressively.
+  const BASE_TURN_RATE = 2.5;        // rad/s at full stick, full activation
+  const HIGH_SPEED_TURN_DROP = 0.30; // top-speed loses 30% of the turn rate
+  const speedFracForTurn = Math.min(1, Math.abs(vF) / Math.max(1, stats.speed));
+  const turnSpeedFactor = 1 - HIGH_SPEED_TURN_DROP * speedFracForTurn;
 
-  // Track rear axle position internally so the car pivots around its rear
-  // axle (as real cars do — the front sweeps wide, the back tracks inside).
-  const halfL = wheelbase * 0.5;
-  const rearX = world.carX - sinH * halfL;
-  const rearY = world.carY + cosH * halfL;
+  // Flip stick when reversing so right-stick keeps meaning right-turn.
+  const turnSign = vF >= 0 ? 1 : -1;
 
-  // Kinematic bicycle: angular velocity ω = (vF / L) · tan(δ).
-  // At v=0 → ω=0 (no spin). At v>0 the car traces a circular arc of radius
-  // R = L / tan(δ). Reverse turns flip naturally via the sign of vF.
-  const omega = (vF / wheelbase) * Math.tan(delta);
+  const omega = rawWheel * BASE_TURN_RATE * turnActivation * turnSpeedFactor * turnSign;
   world.heading += omega * dt;
 
-  // Advance rear axle along the updated heading, then derive the center.
+  // No lateral velocity. Position is always vF along the new heading,
+  // period. Velocity vector is locked to the nose — no slip, no drift.
   const newSinH = Math.sin(world.heading);
   const newCosH = Math.cos(world.heading);
-  const newRearX = rearX + vF * newSinH * dt;
-  const newRearY = rearY - vF * newCosH * dt;
-  world.carX = newRearX + newSinH * halfL;
-  world.carY = newRearY - newCosH * halfL;
-
-  // Apply residual lateral slip directly to the center (kept small by grip).
-  world.carX += vR * newCosH * dt;
-  world.carY += vR * newSinH * dt;
-
-  // Recompose world velocity components for collisions/rendering downstream.
-  world.carVx = vF * newSinH + vR * newCosH;
-  world.carVy = vF * -newCosH + vR * newSinH;
+  world.carX += vF * newSinH * dt;
+  world.carY += vF * -newCosH * dt;
+  world.carVx = vF * newSinH;
+  world.carVy = vF * -newCosH;
   world.forwardV = vF;
 
   world.speed = world.forwardV;
