@@ -26,8 +26,11 @@
 // Bump 2026-05-13g: trigger APK so DEFAULT_PROGRESS ships with MG
 // unlocked + selected.
 // Bump 2026-05-13h: trigger APK so the OCEAN SPORE-style physics ports
-// ship embedded (persistent 2D velocity, exp-lerp throttle, lateral
-// grip with turn-dependent decay for drift, no 3-phase brake).
+// ship embedded.
+// Bump 2026-05-13i: re-fire APK after Actions budget restore. The
+// previous build (commit 4647e498) was blocked by the "Actions budget
+// is preventing further use" gate before the runner started. Engine
+// code unchanged; this bump just retriggers the workflow.
 
 const { getDefaultConfig } = require('expo/metro-config');
 
