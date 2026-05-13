@@ -24,8 +24,10 @@
 // Bump 2026-05-13f: trigger APK so the heading-locked velocity engine
 // ships embedded.
 // Bump 2026-05-13g: trigger APK so DEFAULT_PROGRESS ships with MG
-// unlocked + selected (loadProgress also force-upgrades existing saves
-// so AUTO-FIRE actually fires something on first launch).
+// unlocked + selected.
+// Bump 2026-05-13h: trigger APK so the OCEAN SPORE-style physics ports
+// ship embedded (persistent 2D velocity, exp-lerp throttle, lateral
+// grip with turn-dependent decay for drift, no 3-phase brake).
 
 const { getDefaultConfig } = require('expo/metro-config');
 

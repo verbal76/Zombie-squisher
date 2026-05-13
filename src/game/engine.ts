@@ -11,15 +11,15 @@ export interface World {
   carY: number;
   /** Heading in radians. 0 = facing toward -Y, up the screen. */
   heading: number;
-  /** Forward speed scalar in heading direction. Negative = reversing. */
+  /** Forward speed scalar in heading direction. Negative = reversing. Derived each tick from the persistent 2D velocity. */
   forwardV: number;
-  /** Seconds the brake has been held while fully stopped. */
+  /** Vestigial: kept on World for save/runtime compat. New physics has no 3-phase brake. */
   brakeHoldTimer: number;
   carVx: number;
   carVy: number;
-  /** Smoothed steering input -1..1 for body roll and readable turning. */
+  /** Smoothed wheel input -1..1 for body roll. Does NOT feed the steering force. */
   steeringAngle: number;
-  /** Kept for compatibility with existing save/runtime shape. Not used for accumulated spin. */
+  /** Instantaneous heading turn rate (rad/s) for the current tick. */
   angularVelocity: number;
   scroll: number;
   speed: number;
@@ -135,7 +135,7 @@ export function createWorld(width: number, height: number, p: Progress): World {
 export interface UpdateInput {
   /** -1..1 turn input from stick X. Negative = left. */
   wheel: number;
-  /** -1..1 throttle axis. Positive = forward. Negative = brake/reverse. */
+  /** -1..1 throttle axis. Positive = forward. Negative = brake/reverse (target speed flips sign). */
   throttleAxis: number;
   fire: boolean;
   triggerAbility: boolean;
@@ -188,81 +188,121 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
   const maxSpeed = stats.speed * nitroMul;
   const maxReverseSpeed = stats.speed * 0.3;
-  const reverseHoldSeconds = 0.85;
-  const reverseAccelFactor = 0.5;
 
-  let vF = world.forwardV;
+  // === Ocean Spore-style physics ===
+  // Velocity is the persistent 2D state in world.carVx/Vy. Each tick:
+  //   1) Body-roll mirror: smoothed wheel input feeds world.steeringAngle
+  //      for CarMesh's body-roll animation only.
+  //   2) Steering applies an instant turn rate to world.heading (no wheel
+  //      inertia on the force itself -- Ocean Spore uses raw input.dx).
+  //   3) The persistent velocity is re-decomposed against the NEW heading
+  //      into vFwd (along nose) and vLat (perpendicular). Heading rotation
+  //      creates lateral carry-over which becomes drift.
+  //   4) Throttle exp-lerps vFwd toward (throttleAxis * maxSpeed). Reverse
+  //      "emerges" from a negative target -- no 3-phase brake/hold logic.
+  //   5) Lateral grip exp-lerps vLat toward 0, fast when going straight
+  //      (LAT_GRIP_STRAIGHT) and slow in a hard turn (LAT_GRIP_TURN) so the
+  //      rear slides through corners.
+  //   6) Recompose vFwd + vLat back into world.carVx/Vy.
+  //   7) Position integrates from carVx/Vy.
 
-  const stickDeadzone = 0.15;
-  const axisRaw = Math.max(-1, Math.min(1, input.throttleAxis));
-  const axisAbs = Math.abs(axisRaw);
-  const axisAdj = axisAbs < stickDeadzone ? 0 : (axisAbs - stickDeadzone) / (1 - stickDeadzone);
-  const throttleMag = axisRaw > 0 ? axisAdj : 0;
-  const brakeMag = axisRaw < 0 ? axisAdj : 0;
+  const FORWARD_K = 2.5;          // exp-lerp rate toward target speed
+  const LAT_GRIP_STRAIGHT = 6.0;  // lateral decay rate going straight (rubber on pavement)
+  const LAT_GRIP_TURN = 2.5;      // lateral decay rate in a hard turn (drift)
+  const COAST_DAMP = 0.5;         // forward damping per second when stick is centered
+  const STICK_DEADZONE = 0.10;    // throttleAxis below this is treated as centered
 
-  if (brakeMag > 0) {
-    if (vF > 0.5) {
-      vF = Math.max(0, vF - stats.brakeStrength * brakeMag * dt);
-      world.brakeHoldTimer = 0;
-    } else if (vF > -0.5) {
-      vF *= Math.pow(0.05, dt);
-      if (Math.abs(vF) < 0.5) vF = 0;
-
-      world.brakeHoldTimer += dt;
-
-      if (world.brakeHoldTimer >= reverseHoldSeconds) {
-        vF = -stats.acceleration * reverseAccelFactor * brakeMag * dt;
-      }
-    } else {
-      vF = Math.max(-maxReverseSpeed, vF - stats.acceleration * reverseAccelFactor * brakeMag * dt);
-    }
-  } else if (throttleMag > 0) {
-    const speedFrac = Math.min(1, Math.abs(vF) / Math.max(1, maxSpeed));
-    const torqueFactor = 1 - 0.65 * Math.pow(speedFrac, 1.5);
-    vF = Math.min(maxSpeed, vF + stats.acceleration * nitroMul * torqueFactor * throttleMag * dt);
-    world.brakeHoldTimer = 0;
-  } else {
-    vF *= Math.pow(0.5, dt / 1.15);
-    if (Math.abs(vF) < 0.5) vF = 0;
-    world.brakeHoldTimer = 0;
-  }
-
+  // --- Wheel input shaping (kept for body-roll feel) ---
   const rawWheelInput = Math.max(-1, Math.min(1, input.wheel));
   const shapedWheel = Math.sign(rawWheelInput) * Math.pow(Math.abs(rawWheelInput), 1.25);
   const rawWheel = Math.abs(shapedWheel) < 0.05 ? 0 : shapedWheel;
 
-  const steerLerp = 1 - Math.pow(0.04, dt);
-  world.steeringAngle += (rawWheel - world.steeringAngle) * steerLerp;
+  // Body-roll mirror: lagged smoothing for CarMesh's roll animation only.
+  // Does NOT feed back into the steering force -- that uses rawWheel directly
+  // for instant response (Ocean Spore convention).
+  const wheelLerp = 1 - Math.pow(0.04, dt);
+  world.steeringAngle += (rawWheel - world.steeringAngle) * wheelLerp;
 
-  const absSpeed = Math.abs(vF);
-  const speedTurnFactor = Math.min(1, absSpeed / 70);
-  const handlingFactor = Math.max(0.75, Math.min(1.35, stats.handling / 280));
-
+  // --- Speed-dependent turn authority (using total world speed, not just vFwd) ---
+  const speedMag = Math.hypot(world.carVx, world.carVy);
+  const speedRatio = Math.min(1, speedMag / Math.max(1, stats.speed));
+  const speedTurnFactor = Math.min(1, speedMag / 70);
   const lowSpeedTurnBoost = 0.25;
   const turnAuthority = lowSpeedTurnBoost + (1 - lowSpeedTurnBoost) * speedTurnFactor;
+  const handlingFactor = Math.max(0.75, Math.min(1.35, stats.handling / 280));
+  const highSpeedLimit = 1 - 0.45 * speedRatio;
+  const baseTurn = 2.75 * handlingFactor * highSpeedLimit;
 
-  const highSpeedLimit = 1 - 0.45 * Math.min(1, absSpeed / Math.max(1, stats.speed));
-  const maxTurnRate = 2.75 * handlingFactor * highSpeedLimit;
+  // Arcade convention: stick-right turns car-right even in reverse. Check
+  // forward sign against OLD heading to decide the flip.
+  const sinHOld = Math.sin(world.heading);
+  const cosHOld = Math.cos(world.heading);
+  const vFwdOld = world.carVx * sinHOld + world.carVy * (-cosHOld);
+  const reverseSteerSign = vFwdOld < -0.5 ? -1 : 1;
 
-  const reverseSteerSign = vF < -0.5 ? -1 : 1;
-  const turnRate = world.steeringAngle * maxTurnRate * turnAuthority * reverseSteerSign;
+  const maxTurnNow = baseTurn * turnAuthority;
+  const omegaForFrame = rawWheel * maxTurnNow * reverseSteerSign;
+  const turnApplied = omegaForFrame * dt;
+  world.heading += turnApplied;
+  world.angularVelocity = omegaForFrame;
 
-  world.angularVelocity = turnRate;
-  world.heading += turnRate * dt;
-
+  // --- Re-decompose persistent velocity against NEW heading ---
+  // World.carVx/Vy haven't been touched yet, so this captures the lateral
+  // carry-over produced by the heading rotation.
   const sinH = Math.sin(world.heading);
   const cosH = Math.cos(world.heading);
+  const fX = sinH;
+  const fY = -cosH;
+  const rX = cosH;
+  const rY = sinH;
 
-  world.carVx = sinH * vF;
-  world.carVy = -cosH * vF;
+  let vFwd = world.carVx * fX + world.carVy * fY;
+  let vLat = world.carVx * rX + world.carVy * rY;
 
+  // --- Throttle: signed exp-lerp toward target speed ---
+  // Positive throttleAxis -> target = +axis * maxSpeed (forward).
+  // Negative throttleAxis -> target = -|axis| * maxReverseSpeed (brake/reverse).
+  // The exp-lerp does both acceleration and deceleration smoothly; reverse
+  // emerges from sign flip without 3-phase logic.
+  const axisRaw = Math.max(-1, Math.min(1, input.throttleAxis));
+  const axisAbs = Math.abs(axisRaw);
+  const axisAdj = axisAbs < STICK_DEADZONE
+    ? 0
+    : (axisAbs - STICK_DEADZONE) / (1 - STICK_DEADZONE);
+  const axisSigned = axisRaw >= 0 ? axisAdj : -axisAdj;
+
+  if (Math.abs(axisSigned) > 0) {
+    const targetSpeed = axisSigned >= 0
+      ? axisSigned * maxSpeed
+      : axisSigned * maxReverseSpeed;
+    vFwd = vFwd + (targetSpeed - vFwd) * (1 - Math.exp(-FORWARD_K * dt));
+    world.brakeHoldTimer = 0;
+  } else {
+    // Coast: forward decays multiplicatively. Lateral handled below.
+    vFwd *= Math.max(0, 1 - COAST_DAMP * dt);
+    if (Math.abs(vFwd) < 0.5) vFwd = 0;
+    world.brakeHoldTimer = 0;
+  }
+
+  // --- Lateral grip: turn-dependent decay ---
+  // Going straight (|wheel| -> 0): latK = LAT_GRIP_STRAIGHT, fast lateral kill.
+  // Hard turn (|wheel| -> 1): latK = LAT_GRIP_TURN, slow decay -> drift.
+  const turningFactor = Math.min(1, Math.abs(rawWheel));
+  const latK = LAT_GRIP_STRAIGHT - (LAT_GRIP_STRAIGHT - LAT_GRIP_TURN) * turningFactor;
+  vLat = vLat + (0 - vLat) * (1 - Math.exp(-latK * dt));
+
+  // --- Recompose persistent velocity and integrate position ---
+  world.carVx = fX * vFwd + rX * vLat;
+  world.carVy = fY * vFwd + rY * vLat;
   world.carX += world.carVx * dt;
   world.carY += world.carVy * dt;
 
-  world.forwardV = vF;
+  // Expose scalars for HUD / animation / collision code downstream.
+  world.forwardV = vFwd;
   world.speed = world.forwardV;
 
-  const speedNow = Math.abs(vF);
+  // Smoothed normalized momentum for HUD bar.
+  const speedNow = Math.hypot(world.carVx, world.carVy);
   const targetMomentum = Math.min(1, speedNow / Math.max(1, stats.speed));
   const momentumLerp = 1 - Math.pow(0.1, dt);
   world.momentum += (targetMomentum - world.momentum) * momentumLerp;
@@ -377,6 +417,8 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
           world.invuln = 120;
         }
       } else {
+        // Damp the PERSISTENT 2D velocity. Both vFwd and vLat decay
+        // together; next tick's decompose picks up the slowdown correctly.
         world.carVx *= Math.pow(0.4, dt);
         world.carVy *= Math.pow(0.4, dt);
         world.forwardV *= Math.pow(0.4, dt);
