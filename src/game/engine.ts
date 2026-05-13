@@ -56,6 +56,11 @@ export const ZOMBIE_FLEE_STREAK = 10;
 // performance. 500 lets the horde feel dense without crashing the render.
 export const MAX_ACTIVE_ZOMBIES = 500;
 
+// Each zombie struck by the front/rear bumper bleeds this fraction off
+// the car's speed (cumulative across all zombies hit this tick). Plowing
+// into a large horde can stall the car out -- per design request.
+const PER_HIT_SLOW = 0.97;
+
 export const TUNING = {
   ZOMBIE_MOVE_LERP_K: 3.0,
   SPAWN_RING_RADIUS: 750,
@@ -374,7 +379,18 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     const def = ZOMBIE_DEFS[z.kind];
 
     if (z.x + z.size > carBox.x1 && z.x - z.size < carBox.x2 && z.y + z.size > carBox.y1 && z.y - z.size < carBox.y2) {
-      if (isImpact) {
+      // Decide bumper hit vs side hit using the zombie's position in
+      // car-local coordinates (fX/fY = car forward, rX/rY = car right).
+      // A side hit damages the car even at impact speed -- only a direct
+      // front/rear bumper contact at >= KILL_SPEED kills the zombie.
+      const cdx = z.x - world.carX;
+      const cdy = z.y - world.carY;
+      const localFwd = cdx * fX + cdy * fY;
+      const localLat = cdx * rX + cdy * rY;
+      const isSideHit = Math.abs(localLat) > Math.abs(localFwd);
+      const isBumperImpact = isImpact && !isSideHit;
+
+      if (isBumperImpact) {
         const speedScale = Math.max(1, Math.min(2, carSpeed / Math.max(1, stats.speed * 0.4)));
         z.hp -= stats.bumperDamage * bumperBonus * speedScale;
 
@@ -383,6 +399,12 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
         z.vx += (world.carVx * inv) * knockback;
         z.vy += (world.carVy * inv) * knockback;
+
+        // Per-hit slowdown: every zombie struck bleeds momentum so a
+        // dense horde can stall the car.
+        world.forwardV *= PER_HIT_SLOW;
+        world.carVx   *= PER_HIT_SLOW;
+        world.carVy   *= PER_HIT_SLOW;
 
         if (z.hp <= 0) {
           world.shake = Math.min(24, world.shake + 2 + speedScale);
@@ -394,6 +416,9 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
           world.invuln = 120;
         }
       } else {
+        // Side hit (any speed) OR slow contact at the bumper. Either
+        // way the car takes damage and bleeds speed; the zombie keeps
+        // walking.
         world.carVx *= Math.pow(0.4, dt);
         world.carVy *= Math.pow(0.4, dt);
         world.forwardV *= Math.pow(0.4, dt);

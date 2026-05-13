@@ -41,24 +41,25 @@ const CAMERA_CONFIG = {
 const HUD_TICK_MS = 100;
 
 // === Button layout ===
-//   bottom-left:   [ ◀ LEFT ] [ F ]
-//   right column:   [ TURBO ]                       (stacked above the RIGHT arrow)
+//   left column:    [ GUNS ]                       (stacked above the LEFT arrow)
+//                  [ ◀ LEFT ] [ F ]
+//   right column:   [ TURBO ]                      (stacked above the RIGHT arrow)
 //                  [ R ] [ ▶ RIGHT ]
 const ARROW_BTN_SIZE = 88;
 const MID_BTN_SIZE   = 68;
 const INTRA_CLUSTER_GAP = 14;
-const INTRA_VERTICAL_GAP = 12; // vertical gap between TURBO and the right-arrow it sits above
+const INTRA_VERTICAL_GAP = 12; // vertical gap between TURBO/GUNS and the arrow each sits above
 const EDGE_MARGIN = 16;
 const BUTTON_ROW_BOTTOM = 22;
 const BUTTON_ROW_HITSLOP = 22;
-// Container extends taller to accommodate the TURBO stacked above the bottom row.
+// Container extends taller to accommodate the TURBO/GUNS stacked above the bottom row.
 const CONTROL_OVERLAY_H = ARROW_BTN_SIZE + MID_BTN_SIZE + INTRA_VERTICAL_GAP + BUTTON_ROW_BOTTOM * 2;
 
-type TouchKind = 'steerLeft' | 'steerRight' | 'gearForward' | 'gearReverse' | 'turbo';
+type TouchKind = 'steerLeft' | 'steerRight' | 'gearForward' | 'gearReverse' | 'turbo' | 'gunsToggle';
 interface TouchState { kind: TouchKind; }
 
 const HOLD_KINDS = new Set<TouchKind>(['steerLeft', 'steerRight', 'turbo']);
-const TAP_KINDS  = new Set<TouchKind>(['gearForward', 'gearReverse']);
+const TAP_KINDS  = new Set<TouchKind>(['gearForward', 'gearReverse', 'gunsToggle']);
 
 // === Static horizon buildings ===
 const HORIZON_BUILDING_COUNT = 56;
@@ -101,9 +102,11 @@ export function GameScreen({ progress, onEnd }: Props) {
   const steerRightRef = useRef(false);
   const gearRef       = useRef<GearState>('forward');
   const turboRef      = useRef(false);
+  const autoFireRef   = useRef(true);
   const abilityTriggerRef = useRef(false);
   const [gearVisual, setGearVisual] = useState<GearState>('forward');
   const [turboVisual, setTurboVisual] = useState(false);
+  const [autoFireVisual, setAutoFireVisual] = useState(true);
   const [, setTick] = useState(0);
   const [exited, setExited] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -126,13 +129,18 @@ export function GameScreen({ progress, onEnd }: Props) {
   const rightArrowX = sw - EDGE_MARGIN - ARROW_BTN_SIZE;
   const revBtnX     = sw - EDGE_MARGIN - ARROW_BTN_SIZE - INTRA_CLUSTER_GAP - MID_BTN_SIZE;
 
-  // TURBO: sits directly ABOVE the right arrow, horizontally centered to it.
+  // TURBO: above the right arrow, horizontally centered to it.
   const turboX = rightArrowX + (ARROW_BTN_SIZE - MID_BTN_SIZE) / 2;
   const turboY = arrowY - INTRA_VERTICAL_GAP - MID_BTN_SIZE;
+
+  // GUNS toggle: above the left arrow, mirror of TURBO.
+  const gunsX = leftArrowX + (ARROW_BTN_SIZE - MID_BTN_SIZE) / 2;
+  const gunsY = arrowY - INTRA_VERTICAL_GAP - MID_BTN_SIZE;
 
   const btnLayouts: { kind: TouchKind; x: number; y: number; w: number; h: number }[] = [
     { kind: 'steerLeft',   x: leftArrowX,  y: arrowY, w: ARROW_BTN_SIZE, h: ARROW_BTN_SIZE },
     { kind: 'gearForward', x: fwdBtnX,     y: midY,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
+    { kind: 'gunsToggle',  x: gunsX,       y: gunsY,  w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
     { kind: 'turbo',       x: turboX,      y: turboY, w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
     { kind: 'gearReverse', x: revBtnX,     y: midY,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
     { kind: 'steerRight',  x: rightArrowX, y: arrowY, w: ARROW_BTN_SIZE, h: ARROW_BTN_SIZE },
@@ -155,7 +163,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         steerRight: steerRightRef.current,
         gear:       gearRef.current,
         turbo:      turboRef.current,
-        fire:       true,
+        fire:       autoFireRef.current,
         triggerAbility: abilityTriggerRef.current,
       }, progress);
       abilityTriggerRef.current = false;
@@ -206,6 +214,10 @@ export function GameScreen({ progress, onEnd }: Props) {
     } else if (kind === 'gearReverse') {
       gearRef.current = 'reverse';
       setGearVisual('reverse');
+    } else if (kind === 'gunsToggle') {
+      const next = !autoFireRef.current;
+      autoFireRef.current = next;
+      setAutoFireVisual(next);
     }
   }
 
@@ -252,7 +264,7 @@ export function GameScreen({ progress, onEnd }: Props) {
   const _cH = Math.cos(w.heading);
   const _vL = w.carVx * _cH + w.carVy * _sH;
   const dbgEng = `hd=${(w.heading * 180 / Math.PI).toFixed(0)}°  vF=${w.forwardV.toFixed(0)}  vL=${_vL.toFixed(0)}  ω=${w.angularVelocity.toFixed(2)}`;
-  const dbgInp = `L=${steerLeftRef.current ? 1 : 0}  R=${steerRightRef.current ? 1 : 0}  gear=${gearVisual}  turbo=${turboVisual ? 1 : 0}`;
+  const dbgInp = `L=${steerLeftRef.current ? 1 : 0}  R=${steerRightRef.current ? 1 : 0}  gear=${gearVisual}  turbo=${turboVisual ? 1 : 0}  guns=${autoFireVisual ? 1 : 0}`;
   const dbgZ = `z=${w.zombies.length}  pr=${w.projectiles.length}  hp=${w.hp.toFixed(0)}/${w.maxHp.toFixed(0)}`;
 
   return (
@@ -334,6 +346,8 @@ export function GameScreen({ progress, onEnd }: Props) {
           const activeGear =
             (b.kind === 'gearForward' && gearVisual === 'forward') ||
             (b.kind === 'gearReverse' && gearVisual === 'reverse');
+          const gunsOn = b.kind === 'gunsToggle' && autoFireVisual;
+          const gunsOff = b.kind === 'gunsToggle' && !autoFireVisual;
 
           let label = '';
           let extraStyle: any = null;
@@ -342,6 +356,7 @@ export function GameScreen({ progress, onEnd }: Props) {
           else if (b.kind === 'gearForward') { label = 'F';  extraStyle = activeGear ? styles.btnGearForward : null; }
           else if (b.kind === 'gearReverse') { label = 'R';  extraStyle = activeGear ? styles.btnGearReverse : null; }
           else if (b.kind === 'turbo')       { label = '⚡'; extraStyle = pressed ? styles.btnTurbo : null; }
+          else if (b.kind === 'gunsToggle')  { label = '🔫'; extraStyle = gunsOn ? styles.btnGunsOn : (gunsOff ? styles.btnGunsOff : null); }
 
           const isArrow = b.kind === 'steerLeft' || b.kind === 'steerRight';
           const textStyle = isArrow ? styles.arrowText : styles.midBtnText;
@@ -712,6 +727,15 @@ const styles = StyleSheet.create({
   btnTurbo: {
     backgroundColor: 'rgba(255,210,74,0.30)',
     borderColor: '#ffd24a',
+  },
+  btnGunsOn: {
+    backgroundColor: 'rgba(58,203,85,0.25)',
+    borderColor: '#3acb55',
+  },
+  btnGunsOff: {
+    backgroundColor: 'rgba(80,80,80,0.20)',
+    borderColor: 'rgba(255,255,255,0.20)',
+    opacity: 0.55,
   },
   arrowText: { color: '#fff', fontSize: 36, fontWeight: '900' },
   midBtnText:  { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 1 },

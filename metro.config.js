@@ -1,12 +1,10 @@
 // Metro config bump only -- fires android-build workflow so a fresh
-// APK ships the latest src/** state (chase cam + corner-clustered
-// button layout + smaller zombies + Ocean Spore physics + landscape
-// lock). No source changes in this commit.
+// APK ships the latest src/** state (GUNS on/off toggle button above
+// the LEFT arrow, side-impact damage rule, per-hit horde slowdown).
+// No source changes in this commit.
 //
-// 2026-05-13m: APK trigger for corner-clustered button layout
-// (bddbf1b5) and zombie scale 12 (4b5c37bb). If OTA isn't applying
-// reliably, a fresh APK install guarantees the latest code is what
-// runs.
+// 2026-05-13n: APK trigger for GUNS toggle button + side-hit damage
+// + per-hit slowdown.
 
 const { getDefaultConfig } = require('expo/metro-config');
 
