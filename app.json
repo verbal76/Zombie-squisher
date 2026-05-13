@@ -4,7 +4,7 @@
     "slug": "zombie",
     "owner": "hot-attic-games",
     "version": "1.0.0",
-    "orientation": "default",
+    "orientation": "landscape",
     "userInterfaceStyle": "dark",
     "scheme": "zombiesquisher",
     "newArchEnabled": false,

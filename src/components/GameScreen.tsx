@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Animated, GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Canvas, useFrame } from '@react-three/fiber/native';
 import { Box3, Object3D, Vector3 } from 'three';
 import { Progress, Vehicle, Projectile, BloodSpot } from '../types';
@@ -41,12 +41,11 @@ const HUD_TICK_MS = 100;
 
 // === FRZ-style five-button bottom row ===
 //   [ ← ] [ F ] [ TURBO ] [ R ] [ → ]
-// LEFT / RIGHT arrows are bigger (thumb-friendly), middle three are smaller.
-const ARROW_BTN_SIZE = 92;
-const MID_BTN_SIZE   = 72;
-const BUTTON_ROW_GAP = 12;
+const ARROW_BTN_SIZE = 88;
+const MID_BTN_SIZE   = 68;
+const BUTTON_ROW_GAP = 14;
 const BUTTON_ROW_BOTTOM = 22;
-const BUTTON_ROW_HITSLOP = 20;
+const BUTTON_ROW_HITSLOP = 22;
 const CONTROL_OVERLAY_H = ARROW_BTN_SIZE + BUTTON_ROW_BOTTOM * 2;
 
 const BUTTON_ROW_TOTAL_W =
@@ -74,12 +73,11 @@ export function GameScreen({ progress, onEnd }: Props) {
   const vehicle = VEHICLES[progress.selectedVehicle];
   const ability = ABILITIES[progress.selectedAbility];
 
-  const screen = Dimensions.get('window');
-  const sw = screen.width;
-  const sh = screen.height;
+  // useWindowDimensions subscribes to dimension changes so the layout
+  // recomputes on rotation (and the button hit-areas stay in sync with
+  // the rendered button positions).
+  const { width: sw, height: sh } = useWindowDimensions();
 
-  // Pre-compute each button's pixel position so the touch dispatcher (classify)
-  // can run a flat hit-test per finger.
   const rowStartX = (sw - BUTTON_ROW_TOTAL_W) / 2;
   const rowCenterY = sh - BUTTON_ROW_BOTTOM - ARROW_BTN_SIZE / 2;
   const btnLayouts: { kind: TouchKind; x: number; y: number; w: number; h: number }[] = [
@@ -264,8 +262,6 @@ export function GameScreen({ progress, onEnd }: Props) {
         <Text style={styles.gearIcon}>⚙</Text>
       </Pressable>
 
-      {/* Five-button control row. Container is full-bottom for the responder;
-          individual button visuals are absolute-positioned per btnLayouts. */}
       <View
         style={{
           position: 'absolute',
@@ -307,7 +303,7 @@ export function GameScreen({ progress, onEnd }: Props) {
                 styles.ctlBtn,
                 {
                   left: b.x,
-                  top: b.y - (sh - CONTROL_OVERLAY_H), // re-anchor into local coord of the overlay container
+                  top: b.y - (sh - CONTROL_OVERLAY_H),
                   width: b.w,
                   height: b.h,
                   borderRadius: b.w / 2,
