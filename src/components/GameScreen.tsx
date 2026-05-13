@@ -40,15 +40,17 @@ const CAMERA_CONFIG = {
 
 const HUD_TICK_MS = 100;
 
+// === Corner-clustered control layout ===
+//   bottom-left:  [ ◀ LEFT ] [ F ]                    -- thumb's natural reach
+//   bottom-center:                       [ TURBO ]
+//   bottom-right:                                       [ R ] [ ▶ RIGHT ]
 const ARROW_BTN_SIZE = 88;
 const MID_BTN_SIZE   = 68;
-const BUTTON_ROW_GAP = 14;
+const INTRA_CLUSTER_GAP = 14;   // between arrow and gear button in each corner
+const EDGE_MARGIN = 16;          // distance from screen edge to outer button
 const BUTTON_ROW_BOTTOM = 22;
 const BUTTON_ROW_HITSLOP = 22;
 const CONTROL_OVERLAY_H = ARROW_BTN_SIZE + BUTTON_ROW_BOTTOM * 2;
-
-const BUTTON_ROW_TOTAL_W =
-  2 * ARROW_BTN_SIZE + 3 * MID_BTN_SIZE + 4 * BUTTON_ROW_GAP;
 
 type TouchKind = 'steerLeft' | 'steerRight' | 'gearForward' | 'gearReverse' | 'turbo';
 interface TouchState { kind: TouchKind; }
@@ -74,14 +76,29 @@ export function GameScreen({ progress, onEnd }: Props) {
 
   const { width: sw, height: sh } = useWindowDimensions();
 
-  const rowStartX = (sw - BUTTON_ROW_TOTAL_W) / 2;
+  // Rows of buttons aligned by CENTER Y, even though arrow buttons (88px)
+  // are taller than gear/turbo buttons (68px).
   const rowCenterY = sh - BUTTON_ROW_BOTTOM - ARROW_BTN_SIZE / 2;
+  const arrowY = rowCenterY - ARROW_BTN_SIZE / 2;
+  const midY   = rowCenterY - MID_BTN_SIZE / 2;
+
+  // Bottom-left cluster: LEFT-arrow flush with EDGE_MARGIN, F to its right.
+  const leftArrowX = EDGE_MARGIN;
+  const fwdBtnX    = EDGE_MARGIN + ARROW_BTN_SIZE + INTRA_CLUSTER_GAP;
+
+  // Bottom-right cluster: RIGHT-arrow flush with right EDGE_MARGIN, R to its left.
+  const rightArrowX = sw - EDGE_MARGIN - ARROW_BTN_SIZE;
+  const revBtnX     = sw - EDGE_MARGIN - ARROW_BTN_SIZE - INTRA_CLUSTER_GAP - MID_BTN_SIZE;
+
+  // Center: TURBO horizontally centered.
+  const turboX = (sw - MID_BTN_SIZE) / 2;
+
   const btnLayouts: { kind: TouchKind; x: number; y: number; w: number; h: number }[] = [
-    { kind: 'steerLeft',   x: rowStartX,                                                                      y: rowCenterY - ARROW_BTN_SIZE / 2, w: ARROW_BTN_SIZE, h: ARROW_BTN_SIZE },
-    { kind: 'gearForward', x: rowStartX + ARROW_BTN_SIZE + BUTTON_ROW_GAP,                                    y: rowCenterY - MID_BTN_SIZE / 2,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
-    { kind: 'turbo',       x: rowStartX + ARROW_BTN_SIZE + MID_BTN_SIZE + 2 * BUTTON_ROW_GAP,                 y: rowCenterY - MID_BTN_SIZE / 2,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
-    { kind: 'gearReverse', x: rowStartX + ARROW_BTN_SIZE + 2 * MID_BTN_SIZE + 3 * BUTTON_ROW_GAP,             y: rowCenterY - MID_BTN_SIZE / 2,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
-    { kind: 'steerRight',  x: rowStartX + ARROW_BTN_SIZE + 3 * MID_BTN_SIZE + 4 * BUTTON_ROW_GAP,             y: rowCenterY - ARROW_BTN_SIZE / 2, w: ARROW_BTN_SIZE, h: ARROW_BTN_SIZE },
+    { kind: 'steerLeft',   x: leftArrowX,  y: arrowY, w: ARROW_BTN_SIZE, h: ARROW_BTN_SIZE },
+    { kind: 'gearForward', x: fwdBtnX,     y: midY,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
+    { kind: 'turbo',       x: turboX,      y: midY,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
+    { kind: 'gearReverse', x: revBtnX,     y: midY,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
+    { kind: 'steerRight',  x: rightArrowX, y: arrowY, w: ARROW_BTN_SIZE, h: ARROW_BTN_SIZE },
   ];
 
   const touchesRef = useRef<Map<number | string, TouchState>>(new Map());
@@ -350,14 +367,6 @@ function GrassGround({ world }: { world: World }) {
   useFrame(() => {
     if (!meshRef.current) return;
     meshRef.current.position.set(world.carX, 0, world.carY);
-    // Texture offset: positive X correlates with world +X (correct),
-    // but world.carY maps to three.js Z and the plane is rotated -PI/2
-    // around X, so plane-local +V points to world -Z. To make the
-    // texture appear WORLD-LOCKED (ground stays put in world space
-    // while the player drives over it), offset.y must use the NEGATED
-    // car Y. Without the negation, the ground appears to flow AWAY
-    // from the player when driving forward; with it, the ground flows
-    // toward the player as expected.
     tex.offset.set(world.carX / 100, -world.carY / 100);
   });
   return (

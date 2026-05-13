@@ -6,11 +6,11 @@ import { ZOMBIE_DEFS } from '../data/zombies';
 import { pickCharacterIdForZombie } from '../assets/characters';
 import { loadCharacter } from '../render/loadCharacter';
 
-// World-unit scale we render Kenney models at. The blocky models are ~2 units
-// tall in their own coordinate space. 2x scale: walkers ~32 units tall on the
-// ground, bosses ~56 units. (Previously 4x at scale=32 was too big; 2x reads
-// fine from chase cam without feeling oversized.)
-const BASE_SCALE = 16;
+// World-unit scale we render Kenney models at. Kenney characters are ~2
+// units tall in local frame. At BASE_SCALE = 24, walkers render at ~48
+// units tall -- slightly taller than the typical car (~40 units tall
+// after fitScaleFor).
+const BASE_SCALE = 24;
 const BOSS_SCALE = BASE_SCALE * 1.75;
 
 interface Props {
@@ -41,8 +41,6 @@ export function ZombieCharacter({ z }: Props) {
     if (!groupRef.current) return;
     // Kenney character GLBs have their origin at the CENTER of the model,
     // not at the feet. Lift by `scale` so feet sit on the ground plane.
-    // (Kenney characters are ~2 units tall in local frame -> scaled height
-    // is ~2*scale, half = scale = offset from center-origin to feet.)
     groupRef.current.position.set(z.x, scale, z.y);
     if (z.vx !== 0 || z.vy !== 0) {
       groupRef.current.rotation.y = Math.atan2(z.vx, -z.vy);
@@ -50,10 +48,10 @@ export function ZombieCharacter({ z }: Props) {
   });
 
   if (!model) {
-    // Box fallback while async loading or if load fails. Heights match the
-    // GLB scale path so both render consistently on the ground.
+    // Box fallback while async loading or if load fails. Heights match
+    // the GLB scale so both render consistently on the ground.
     const side = z.size * 4;
-    const height = isBoss ? 56 : 32;
+    const height = isBoss ? 84 : 48;
     return (
       <mesh ref={groupRef} position={[z.x, height / 2, z.y]}>
         <boxGeometry args={[side, height, side]} />
