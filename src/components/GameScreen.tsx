@@ -31,11 +31,14 @@ const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44)
 // heading lerps toward world.heading at CHASE_HEADING_K per second so
 // sharp turns don't snap the view -- the car visibly rotates on screen
 // for a beat before the camera swings around behind it.
-const CHASE_DISTANCE   = 110;
-const CHASE_HEIGHT     = 65;
-const CHASE_LOOK_AHEAD = 150;
+//
+// Pulled back + raised + look further ahead so the car sits in the
+// LOWER portion of the screen (more road / terrain visible above).
+const CHASE_DISTANCE   = 140;
+const CHASE_HEIGHT     = 85;
+const CHASE_LOOK_AHEAD = 240;
 const CHASE_HEADING_K  = 4.0;
-const CAM_FOV = 65;  // wider than top-down (was 50) so peripheral terrain reads
+const CAM_FOV = 65;
 
 const CAMERA_CONFIG = {
   position: [ARENA_W / 2, CHASE_HEIGHT, ARENA_H / 2 + CHASE_DISTANCE] as [number, number, number],
@@ -47,7 +50,6 @@ const CAMERA_CONFIG = {
 const HUD_TICK_MS = 100;
 
 // === FRZ-style five-button bottom row ===
-//   [ ← ] [ F ] [ TURBO ] [ R ] [ → ]
 const ARROW_BTN_SIZE = 88;
 const MID_BTN_SIZE   = 68;
 const BUTTON_ROW_GAP = 14;
@@ -370,11 +372,6 @@ function GrassGround({ world }: { world: World }) {
 
 const CAM_REFERENCE_LENGTH = 80;
 
-// === Chase cam tracker ===
-// Camera sits behind the car along a SMOOTHED heading and looks at a point
-// ahead of the car. The chase distance + height scale by per-vehicle zoom
-// (bigger vehicles -> camera pulled back further) and by boss-zoom when a
-// large enemy is on screen.
 function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const zoomState = useRef<number>(1.0);
   const zoomInit = useRef(false);
@@ -392,8 +389,6 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
       cameraHeadingInit.current = true;
     }
 
-    // Boss/size-aware zoom (pulls chase distance + height back when something
-    // big is on screen, so the player can see what's incoming).
     let maxNearbySize = 0;
     const rSq = TUNING.ZOOM_CONSIDERATION_RADIUS * TUNING.ZOOM_CONSIDERATION_RADIUS;
     for (const z of world.zombies) {
@@ -410,33 +405,21 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     zoomState.current += (targetZoom - zoomState.current) * zoomAlpha;
     const zoom = zoomState.current;
 
-    // Smooth the camera-tracked heading toward the car's heading. Lerping the
-    // SHORT way around the circle prevents the camera from spinning the long
-    // way after a heading wrap. CHASE_HEADING_K = 4/sec -> ~0.17 s half-life.
     let dh = world.heading - cameraHeading.current;
     while (dh > Math.PI) dh -= 2 * Math.PI;
     while (dh < -Math.PI) dh += 2 * Math.PI;
     const hAlpha = 1 - Math.exp(-CHASE_HEADING_K * dt);
     cameraHeading.current += dh * hAlpha;
 
-    // Forward unit vector in three.js (X, Z) at the camera's tracked heading.
-    // Convention: heading=0 -> car faces -Z (i.e., world.carY decreasing).
-    //   fwd = (sin(H), -cos(H)) in (X, Z)
     const camS = Math.sin(cameraHeading.current);
     const camC = Math.cos(cameraHeading.current);
     const fwdX = camS;
     const fwdZ = -camC;
 
-    // Camera position: behind the car along its heading, raised by CHASE_HEIGHT.
-    // Chase distance + height scale with zoom (bigger vehicle or boss zoom
-    // pulls the camera back so the whole scene reads).
     const camX = world.carX - fwdX * CHASE_DISTANCE * zoom;
     const camZ = world.carY - fwdZ * CHASE_DISTANCE * zoom;
     const camY = CHASE_HEIGHT * zoom;
 
-    // LookAt point: ahead of the car along its heading. This biases the
-    // visible area toward incoming terrain / zombies rather than centering
-    // on the car itself.
     const lookX = world.carX + fwdX * CHASE_LOOK_AHEAD;
     const lookZ = world.carY + fwdZ * CHASE_LOOK_AHEAD;
 
@@ -504,7 +487,13 @@ function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     if (!outer.current || !inner.current) return;
     const carY = model ? VEH_GLB_Y : CAR_DEPTH / 2 + CAR_LIFT;
     outer.current.position.set(world.carX, carY, world.carY);
-    outer.current.rotation.y = -world.heading;
+    // Kenney vehicle GLBs are authored facing +Z in their local frame,
+    // but the engine treats world.heading=0 as facing -Z (forward = -Y in
+    // world coords, mapped to -Z in three.js). Adding PI flips the model
+    // 180 degrees around its vertical axis so its NOSE points in the
+    // direction of motion (and the chase cam sees its tail lights, not
+    // its headlights, while driving forward).
+    outer.current.rotation.y = -world.heading + Math.PI;
 
     const safeDt = Math.max(0.001, dt);
     const accel = (world.forwardV - lastV.current) / safeDt;

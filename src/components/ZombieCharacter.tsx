@@ -7,9 +7,11 @@ import { pickCharacterIdForZombie } from '../assets/characters';
 import { loadCharacter } from '../render/loadCharacter';
 
 // World-unit scale we render Kenney models at. The blocky models are ~2 units
-// tall in their own coordinate space; we want walkers ~16 units tall on the
-// ground plane and bosses ~28 units tall (matches the previous box dimensions).
-const BASE_SCALE = 8;
+// tall in their own coordinate space. Bumped 4x for chase-cam visibility:
+// from a behind-the-car perspective, the walkers were too small to read at
+// any meaningful range. Walkers now render at ~64 units tall on the ground,
+// bosses at ~112 units.
+const BASE_SCALE = 32;
 const BOSS_SCALE = BASE_SCALE * 1.75;
 
 interface Props {
@@ -31,7 +33,6 @@ export function ZombieCharacter({ z }: Props) {
         if (mounted) setModel(m);
       })
       .catch((err) => {
-        // Silent: ZombieCharacter falls through to the box fallback below.
         console.warn('character load failed', id, err?.message ?? err);
       });
     return () => { mounted = false; };
@@ -47,8 +48,9 @@ export function ZombieCharacter({ z }: Props) {
 
   if (!model) {
     // Box fallback while async loading or if load fails entirely.
-    const side = z.size * 2;
-    const height = isBoss ? 28 : 16;
+    // Bumped to match the new BASE_SCALE so the fallback isn't tiny.
+    const side = z.size * 8;
+    const height = isBoss ? 112 : 64;
     return (
       <mesh ref={groupRef} position={[z.x, height / 2, z.y]}>
         <boxGeometry args={[side, height, side]} />
