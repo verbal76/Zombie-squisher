@@ -1,12 +1,12 @@
-// Metro config — bump only to fire android-build alongside eas-update.
-// Bump history collapsed; latest:
-//   2026-05-13l: chase cam (NFS-style behind-the-car view). Camera sits
-//   ~110 units behind the car at ~65 units height, looks ~150 units
-//   ahead. Camera-tracked heading lerps toward world.heading at 4/sec
-//   so turns swing the view smoothly. Replaces the pure top-down
-//   camera. FOV bumped to 65 for chase-cam peripheral visibility. Sky
-//   color changed from greenish to bluish since the camera now sees
-//   the horizon.
+// Metro config bump only -- fires android-build workflow so a fresh
+// APK ships the latest src/** state (chase cam + corner-clustered
+// button layout + smaller zombies + Ocean Spore physics + landscape
+// lock). No source changes in this commit.
+//
+// 2026-05-13m: APK trigger for corner-clustered button layout
+// (bddbf1b5) and zombie scale 12 (4b5c37bb). If OTA isn't applying
+// reliably, a fresh APK install guarantees the latest code is what
+// runs.
 
 const { getDefaultConfig } = require('expo/metro-config');
 
