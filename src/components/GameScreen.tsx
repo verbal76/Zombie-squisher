@@ -40,14 +40,10 @@ const CAMERA_CONFIG = {
 
 const HUD_TICK_MS = 100;
 
-// === Corner-clustered control layout ===
-//   bottom-left:  [ ◀ LEFT ] [ F ]                    -- thumb's natural reach
-//   bottom-center:                       [ TURBO ]
-//   bottom-right:                                       [ R ] [ ▶ RIGHT ]
 const ARROW_BTN_SIZE = 88;
 const MID_BTN_SIZE   = 68;
-const INTRA_CLUSTER_GAP = 14;   // between arrow and gear button in each corner
-const EDGE_MARGIN = 16;          // distance from screen edge to outer button
+const INTRA_CLUSTER_GAP = 14;
+const EDGE_MARGIN = 16;
 const BUTTON_ROW_BOTTOM = 22;
 const BUTTON_ROW_HITSLOP = 22;
 const CONTROL_OVERLAY_H = ARROW_BTN_SIZE + BUTTON_ROW_BOTTOM * 2;
@@ -57,6 +53,47 @@ interface TouchState { kind: TouchKind; }
 
 const HOLD_KINDS = new Set<TouchKind>(['steerLeft', 'steerRight', 'turbo']);
 const TAP_KINDS  = new Set<TouchKind>(['gearForward', 'gearReverse']);
+
+// === Static horizon buildings ===
+// Generated once at module load. Positions are RELATIVE to the player car;
+// the Horizon component renders them as children of a group that follows
+// the car each frame, so the skyline is always at the same angular
+// position around the player ("infinite city on the horizon").
+const HORIZON_BUILDING_COUNT = 56;
+const HORIZON_MIN_DIST = 1800;
+const HORIZON_MAX_DIST = 2600;
+const HORIZON_BUILDING_COLORS = [
+  '#2a3744', '#3a4250', '#404a58', '#2d3340', '#4a4754',
+  '#383448', '#2a3a50', '#403838', '#384858', '#2e3e4a',
+];
+
+interface HorizonBuilding {
+  dx: number;
+  dy: number;
+  width: number;
+  height: number;
+  depth: number;
+  color: string;
+}
+
+const HORIZON_BUILDINGS: HorizonBuilding[] = (() => {
+  const out: HorizonBuilding[] = [];
+  // Seeded-feeling pseudo-random so the skyline looks intentional but
+  // varied. Two rings at slightly different radii gives depth.
+  for (let i = 0; i < HORIZON_BUILDING_COUNT; i++) {
+    const angle = (i / HORIZON_BUILDING_COUNT) * Math.PI * 2 + (Math.random() - 0.5) * 0.20;
+    const dist = HORIZON_MIN_DIST + Math.random() * (HORIZON_MAX_DIST - HORIZON_MIN_DIST);
+    out.push({
+      dx: Math.cos(angle) * dist,
+      dy: Math.sin(angle) * dist,
+      width:  90 + Math.random() * 180,
+      height: 80 + Math.random() * 320,
+      depth:  90 + Math.random() * 180,
+      color:  HORIZON_BUILDING_COLORS[i % HORIZON_BUILDING_COLORS.length],
+    });
+  }
+  return out;
+})();
 
 export function GameScreen({ progress, onEnd }: Props) {
   const worldRef = useRef<World>(createWorld(ARENA_W, ARENA_H, progress));
@@ -76,21 +113,14 @@ export function GameScreen({ progress, onEnd }: Props) {
 
   const { width: sw, height: sh } = useWindowDimensions();
 
-  // Rows of buttons aligned by CENTER Y, even though arrow buttons (88px)
-  // are taller than gear/turbo buttons (68px).
   const rowCenterY = sh - BUTTON_ROW_BOTTOM - ARROW_BTN_SIZE / 2;
   const arrowY = rowCenterY - ARROW_BTN_SIZE / 2;
   const midY   = rowCenterY - MID_BTN_SIZE / 2;
 
-  // Bottom-left cluster: LEFT-arrow flush with EDGE_MARGIN, F to its right.
   const leftArrowX = EDGE_MARGIN;
   const fwdBtnX    = EDGE_MARGIN + ARROW_BTN_SIZE + INTRA_CLUSTER_GAP;
-
-  // Bottom-right cluster: RIGHT-arrow flush with right EDGE_MARGIN, R to its left.
   const rightArrowX = sw - EDGE_MARGIN - ARROW_BTN_SIZE;
   const revBtnX     = sw - EDGE_MARGIN - ARROW_BTN_SIZE - INTRA_CLUSTER_GAP - MID_BTN_SIZE;
-
-  // Center: TURBO horizontally centered.
   const turboX = (sw - MID_BTN_SIZE) / 2;
 
   const btnLayouts: { kind: TouchKind; x: number; y: number; w: number; h: number }[] = [
@@ -231,6 +261,8 @@ export function GameScreen({ progress, onEnd }: Props) {
         <directionalLight position={[400, 600, 200]} intensity={0.6} />
 
         <CameraTracker world={w} vehicle={vehicle} />
+
+        <Horizon world={w} />
 
         <GrassGround world={w} />
 
@@ -374,6 +406,33 @@ function GrassGround({ world }: { world: World }) {
       <planeGeometry args={[6000, 6000]} />
       <meshLambertMaterial map={tex} />
     </mesh>
+  );
+}
+
+// === Horizon: distant building ring that follows the car ===
+// The group's position tracks the car each frame, so the buildings sit
+// at fixed angular positions relative to the player -- creating the
+// illusion of an infinite city on the horizon as you drive. They're
+// far enough out (~1800-2600 units) that the player can't reach them,
+// and they have no collision (just visual decoration).
+function Horizon({ world }: { world: World }) {
+  const groupRef = useRef<any>(null);
+  useFrame(() => {
+    if (!groupRef.current) return;
+    groupRef.current.position.set(world.carX, 0, world.carY);
+  });
+  return (
+    <group ref={groupRef}>
+      {HORIZON_BUILDINGS.map((b, i) => (
+        <mesh
+          key={i}
+          position={[b.dx, b.height / 2, b.dy]}
+        >
+          <boxGeometry args={[b.width, b.height, b.depth]} />
+          <meshLambertMaterial color={b.color} />
+        </mesh>
+      ))}
+    </group>
   );
 }
 
