@@ -20,8 +20,10 @@
 // Bump 2026-05-13d: trigger APK so the PHYSICAL VEHICLE MODEL ships
 // embedded.
 // Bump 2026-05-13e: trigger APK so the AUTO-FIRE testing toggle +
-// reverse-gate stick mapping (deliberate 30deg down-cone for brake/
-// reverse) ships embedded.
+// reverse-gate stick mapping ships embedded.
+// Bump 2026-05-13f: trigger APK so the heading-locked velocity engine
+// (vF state, no lateral momentum, handling-scaled turn rate, 1.15 s
+// coast, pow(1.25) wheel curve, 2.75 base turn rate) ships embedded.
 
 const { getDefaultConfig } = require('expo/metro-config');
 

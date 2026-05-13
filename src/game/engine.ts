@@ -9,17 +9,17 @@ export interface World {
   height: number;
   carX: number;
   carY: number;
-  /** Heading in radians. 0 = facing toward -Y (up the screen). */
+  /** Heading in radians. 0 = facing toward -Y, up the screen. */
   heading: number;
   /** Forward speed scalar in heading direction. Negative = reversing. */
   forwardV: number;
-  /** Seconds the brake has been held while fully stopped (drives reverse engagement). */
+  /** Seconds the brake has been held while fully stopped. */
   brakeHoldTimer: number;
   carVx: number;
   carVy: number;
-  /** Smoothed steering input -1..1 (lags raw wheel input to model wheel inertia). */
+  /** Smoothed steering input -1..1 for body roll and readable turning. */
   steeringAngle: number;
-  /** Heading angular velocity (rad/s). Steering applies torque; damping pulls back. */
+  /** Kept for compatibility with existing save/runtime shape. Not used for accumulated spin. */
   angularVelocity: number;
   scroll: number;
   speed: number;
@@ -39,44 +39,26 @@ export interface World {
   shake: number;
   gameOver: boolean;
   nextBossKills: number;
-  /** Current kill streak (resets on hit, on idle for 3s, or on slow contact). */
   streak: number;
-  /** Best streak this run, for HUD display. */
   bestStreak: number;
-  /** Seconds since last kill; used to time-out the streak. */
   streakIdleTimer: number;
-  /** Active streak-milestone banner; consumed by the HUD when shown. */
   streakBannerKind: StreakBannerKind;
-  /** performance.now() at which the banner was last triggered. */
   streakBannerAt: number;
-  /** Smoothed normalized momentum 0..1 for HUD bar. */
   momentum: number;
 }
 
 export type StreakBannerKind = 'spree' | 'reaper' | 'breaker' | 'apocalypse' | null;
 export const KILL_SPEED = 50;
 
-// Tuning constants. Everything magic-numbery that affects feel lives here so a
-// balance pass is "edit one block" rather than "grep across files". See
-// docs/glb-render-pipeline.md philosophy + the top-down movement design doc.
 export const TUNING = {
-  /** Zombie velocity lerp constant. vel approaches target at 1 - exp(-k*dt). */
   ZOMBIE_MOVE_LERP_K: 3.0,
-  /** Where on the ring around the car new zombies spawn. */
   SPAWN_RING_RADIUS: 750,
-  /** Minimum distance between two spawning zombies; rerolled if too close. */
   SPAWN_MIN_DIST: 30,
-  /** Max rejection-sampling rerolls before we just accept the last candidate. */
   SPAWN_MAX_RETRIES: 4,
-  /** Camera scans zombies within this radius for the "scale framing" zoom. */
   ZOOM_CONSIDERATION_RADIUS: 1500,
-  /** Mesh sizes at/below this read as "small", no zoom bonus. */
   ZOOM_SIZE_THRESHOLD: 20,
-  /** At this size (boss territory) we apply the full zoom bonus. */
   ZOOM_SIZE_AT_MIN: 36,
-  /** Multiplier added to camera zoom when biggest nearby entity reaches AT_MIN. */
   ZOOM_BOSS_BONUS: 0.45,
-  /** Zoom convergence speed. Slower than camera follow so zoom feels deliberate. */
   CAMERA_ZOOM_K: 1.5,
 } as const;
 
@@ -92,14 +74,10 @@ export interface DerivedStats {
 export function deriveStats(p: Progress): { vehicle: Vehicle; stats: DerivedStats; weapon: Weapon } {
   const vehicle = VEHICLES[p.selectedVehicle];
   const weapon = WEAPONS[p.selectedWeapon];
-  // Spread defaults FIRST, then overlay saved upgrades. Guards against saved
-  // progress objects that pre-date a field addition (e.g. before the
-  // `acceleration` field was added to UpgradeStats). Without this, an old
-  // save with `{speed:0, armor:0, handling:0}` would leave u.acceleration
-  // undefined → vehicle.baseAcceleration + undefined * 40 = NaN, which
-  // cascades through forwardV/heading/carX/carY and breaks the entire game.
+
   const u = { speed: 0, armor: 0, handling: 0, acceleration: 0, ...(p.upgrades[vehicle.id] ?? {}) };
   const acceleration = vehicle.baseAcceleration + u.acceleration * 40;
+
   const stats: DerivedStats = {
     speed: vehicle.baseSpeed + u.speed * 25,
     armor: vehicle.baseArmor + u.armor * 35,
@@ -108,11 +86,13 @@ export function deriveStats(p: Progress): { vehicle: Vehicle; stats: DerivedStat
     brakeStrength: acceleration * 2.2,
     bumperDamage: 50 + u.armor * 10,
   };
+
   return { vehicle, stats, weapon };
 }
 
 export function createWorld(width: number, height: number, p: Progress): World {
   const { stats } = deriveStats(p);
+
   return {
     width,
     height,
@@ -153,14 +133,9 @@ export function createWorld(width: number, height: number, p: Progress): World {
 }
 
 export interface UpdateInput {
-  /** -1..1 — turn input from stick X (negative = left). */
+  /** -1..1 turn input from stick X. Negative = left. */
   wheel: number;
-  /**
-   * -1..1 — throttle axis driven by stick Y. Positive = forward throttle
-   * (magnitude is proportional), negative = brake / reverse throttle.
-   * Replaces the old throttle/brake boolean pair so a single thumbstick
-   * controls direction, speed, and reverse together.
-   */
+  /** -1..1 throttle axis. Positive = forward. Negative = brake/reverse. */
   throttleAxis: number;
   fire: boolean;
   triggerAbility: boolean;
@@ -168,6 +143,7 @@ export interface UpdateInput {
 
 export function step(world: World, dt: number, input: UpdateInput, p: Progress): void {
   if (world.gameOver) return;
+
   const { vehicle, stats, weapon } = deriveStats(p);
   const sideMod = SIDE_MODS[p.selectedSideMod];
 
@@ -178,16 +154,16 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   if (world.invuln > 0) world.invuln = Math.max(0, world.invuln - dt * 1000);
   if (world.shake > 0) world.shake = Math.max(0, world.shake - dt * 60);
 
-  // Streak times out after 3s of no kill.
   if (world.streak > 0) {
     world.streakIdleTimer += dt;
     if (world.streakIdleTimer > 3.0) world.streak = 0;
   }
 
   if (input.triggerAbility && world.abilityCooldown <= 0 && p.selectedAbility !== 'none') {
-    const a = ABILITIES[p.selectedAbility];
-    world.abilityActive = a.durationMs;
-    world.abilityCooldown = a.cooldownMs;
+    const ability = ABILITIES[p.selectedAbility];
+    world.abilityActive = ability.durationMs;
+    world.abilityCooldown = ability.cooldownMs;
+
     if (p.selectedAbility === 'emp') {
       for (const z of world.zombies) {
         if (z.kind === 'boss') {
@@ -200,7 +176,10 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
       }
       world.shake = 14;
     }
-    if (p.selectedAbility === 'shield') world.invuln = a.durationMs;
+
+    if (p.selectedAbility === 'shield') {
+      world.invuln = ability.durationMs;
+    }
   }
 
   const isNitro = world.abilityActive > 0 && p.selectedAbility === 'nitro';
@@ -208,192 +187,122 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const isShielded = world.invuln > 0 && p.selectedAbility === 'shield' && world.abilityActive > 0;
 
   const maxSpeed = stats.speed * nitroMul;
-  const maxReverseSpeed = stats.speed * 0.3;    // reverse caps lower than forward
-  const REVERSE_HOLD_SECONDS = 1.0;             // longer hold before brake engages reverse
-  const REVERSE_ACCEL_FACTOR = 0.5;             // reverse is torque-limited, slower than forward
+  const maxReverseSpeed = stats.speed * 0.3;
+  const reverseHoldSeconds = 0.85;
+  const reverseAccelFactor = 0.5;
 
-  // Physical vehicle model (per spec: traction + angular inertia + persistent velocity):
-  //   - Heading rotates via angular velocity (rotational inertia). Stick
-  //     applies a torque; angular velocity damps back to zero over time.
-  //   - Velocity is PERSISTENT — it isn't overwritten from heading each frame.
-  //     Lateral momentum decays via lateral friction (speed-dependent grip
-  //     loss) and is pulled toward the heading direction by an alignment term.
-  //   - Position integrates from the persistent velocity, so the car carries
-  //     real momentum through turns instead of teleporting along its nose.
-  //   - Brake → reverse is a 3-phase progression: braking force, near-stop
-  //     hold, then reverse engagement after 1 s of holding brake at zero.
-  //   - Forward acceleration curve is nonlinear (torque-strong at launch,
-  //     soft near top speed). Reverse is half-strength of forward.
+  let vF = world.forwardV;
 
-  const sinH = Math.sin(world.heading);
-  const cosH = Math.cos(world.heading);
-  const fwdX = sinH;
-  const fwdY = -cosH;
-  const rightX = cosH;
-  const rightY = sinH;
-
-  let vF = world.carVx * fwdX + world.carVy * fwdY;
-  let vR = world.carVx * rightX + world.carVy * rightY;
-
-  // Decompose the throttle axis (stick Y) into forward and brake magnitudes.
-  // STICK_DEADZONE is a hard center band; past it, magnitude is rescaled so
-  // axis = STICK_DEADZONE -> 0, axis = 1 -> 1 (analog all the way through).
-  const STICK_DEADZONE = 0.15;
-  const axisRaw = input.throttleAxis;
+  const stickDeadzone = 0.15;
+  const axisRaw = Math.max(-1, Math.min(1, input.throttleAxis));
   const axisAbs = Math.abs(axisRaw);
-  const axisAdj = axisAbs < STICK_DEADZONE
-    ? 0
-    : (axisAbs - STICK_DEADZONE) / (1 - STICK_DEADZONE);
+  const axisAdj = axisAbs < stickDeadzone ? 0 : (axisAbs - stickDeadzone) / (1 - stickDeadzone);
   const throttleMag = axisRaw > 0 ? axisAdj : 0;
-  const brakeMag    = axisRaw < 0 ? axisAdj : 0;
+  const brakeMag = axisRaw < 0 ? axisAdj : 0;
 
   if (brakeMag > 0) {
     if (vF > 0.5) {
-      // Phase 1: real braking — strong negative force scaled by brake mag.
       vF = Math.max(0, vF - stats.brakeStrength * brakeMag * dt);
       world.brakeHoldTimer = 0;
     } else if (vF > -0.5) {
-      // Phase 2: near stopped — pin vF toward 0 and arm the reverse timer.
-      // After REVERSE_HOLD_SECONDS of held-down stick at zero, Phase 3 fires.
       vF *= Math.pow(0.05, dt);
       if (Math.abs(vF) < 0.5) vF = 0;
+
       world.brakeHoldTimer += dt;
-      if (world.brakeHoldTimer >= REVERSE_HOLD_SECONDS) {
-        vF = -stats.acceleration * REVERSE_ACCEL_FACTOR * brakeMag * dt;
+
+      if (world.brakeHoldTimer >= reverseHoldSeconds) {
+        vF = -stats.acceleration * reverseAccelFactor * brakeMag * dt;
       }
     } else {
-      // Phase 3: in reverse — stick-down magnitude acts as reverse throttle.
-      vF = Math.max(-maxReverseSpeed, vF - stats.acceleration * REVERSE_ACCEL_FACTOR * brakeMag * dt);
+      vF = Math.max(-maxReverseSpeed, vF - stats.acceleration * reverseAccelFactor * brakeMag * dt);
     }
   } else if (throttleMag > 0) {
-    // Nonlinear torque curve: strong launch (1.0 at v=0), tapers as a power
-    // curve toward maxSpeed (0.35 at top). Stick magnitude scales the force,
-    // so a half-pushed stick gives half the acceleration.
     const speedFrac = Math.min(1, Math.abs(vF) / Math.max(1, maxSpeed));
     const torqueFactor = 1 - 0.65 * Math.pow(speedFrac, 1.5);
     vF = Math.min(maxSpeed, vF + stats.acceleration * nitroMul * torqueFactor * throttleMag * dt);
     world.brakeHoldTimer = 0;
   } else {
-    // Coast: 1.5 s half-life. Tighter than the old 4 s glide so letting off
-    // the stick produces a noticeable deceleration (less ice-skating feel).
-    vF *= Math.pow(0.5, dt / 1.5);
+    vF *= Math.pow(0.5, dt / 1.15);
     if (Math.abs(vF) < 0.5) vF = 0;
     world.brakeHoldTimer = 0;
   }
 
-  // --- Physical steering: torque → angular velocity → heading ---
-  // Wheel input: small deadzone + pow(1.5) response curve for fine center
-  // control while preserving full magnitude at the rim.
-  const wheelShaped = Math.sign(input.wheel) * Math.pow(Math.abs(input.wheel), 1.5);
-  const rawWheel = Math.abs(wheelShaped) < 0.05 ? 0 : wheelShaped;
+  const rawWheelInput = Math.max(-1, Math.min(1, input.wheel));
+  const shapedWheel = Math.sign(rawWheelInput) * Math.pow(Math.abs(rawWheelInput), 1.25);
+  const rawWheel = Math.abs(shapedWheel) < 0.05 ? 0 : shapedWheel;
 
-  // Mirror stick into world.steeringAngle for the body-roll animation in
-  // CarMesh (which reads world.steeringAngle * speedNorm * 0.18 for tilt).
-  const wheelLerp = 1 - Math.pow(0.02, dt);
-  world.steeringAngle += (rawWheel - world.steeringAngle) * wheelLerp;
+  const steerLerp = 1 - Math.pow(0.04, dt);
+  world.steeringAngle += (rawWheel - world.steeringAngle) * steerLerp;
 
-  // Turn authority: a baseline 0.25 at standstill so the car can pivot off
-  // the line, ramping to 1.0 above TURN_ACTIVATION_SPEED. Different from the
-  // pure-zero activation gate of the Mario-Kart model.
-  const TURN_ACTIVATION_SPEED = 25;
-  const MIN_TURN_AUTHORITY = 0.25;
-  const turnActivation = MIN_TURN_AUTHORITY +
-    (1 - MIN_TURN_AUTHORITY) * Math.min(1, Math.abs(vF) / TURN_ACTIVATION_SPEED);
+  const absSpeed = Math.abs(vF);
+  const speedTurnFactor = Math.min(1, absSpeed / 70);
+  const handlingFactor = Math.max(0.75, Math.min(1.35, stats.handling / 280));
 
-  // Reverse-blend: smoothly transition the steering sign across vF=0 so the
-  // car doesn't twitch when crossing into reverse. Magnitude is reduced
-  // (-0.5 vs +1) so reverse steering is less aggressive than forward.
-  const reverseBlend = Math.max(-1, Math.min(1, vF / 40));
-  const turnSign = reverseBlend >= 0 ? 1 : -0.5;
+  const lowSpeedTurnBoost = 0.25;
+  const turnAuthority = lowSpeedTurnBoost + (1 - lowSpeedTurnBoost) * speedTurnFactor;
 
-  // Apply torque to angular velocity, damp, then integrate heading. The
-  // damping is what gives the chassis its "weight" — released stick decays
-  // smoothly rather than snapping back.
-  const BASE_TURN_RATE = 2.0;
-  const ANGULAR_ACCEL_GAIN = 5.0;
-  const ANGULAR_DAMPING = 6.0;
-  const steeringTorque = rawWheel * BASE_TURN_RATE * turnActivation * turnSign;
-  world.angularVelocity += steeringTorque * ANGULAR_ACCEL_GAIN * dt;
-  world.angularVelocity *= Math.exp(-ANGULAR_DAMPING * dt);
-  world.heading += world.angularVelocity * dt;
+  const highSpeedLimit = 1 - 0.45 * Math.min(1, absSpeed / Math.max(1, stats.speed));
+  const maxTurnRate = 2.75 * handlingFactor * highSpeedLimit;
 
-  // --- Persistent velocity + lateral friction + heading alignment ---
-  const newSinH = Math.sin(world.heading);
-  const newCosH = Math.cos(world.heading);
-  const newFwdX = newSinH;
-  const newFwdY = -newCosH;
-  const newRightX = newCosH;
-  const newRightY = newSinH;
+  const reverseSteerSign = vF < -0.5 ? -1 : 1;
+  const turnRate = world.steeringAngle * maxTurnRate * turnAuthority * reverseSteerSign;
 
-  // Decompose CURRENT world velocity against the NEW heading to extract
-  // the lateral (slip) component.
-  const lateralVel = world.carVx * newRightX + world.carVy * newRightY;
+  world.angularVelocity = turnRate;
+  world.heading += turnRate * dt;
 
-  // Speed-dependent grip: high speed loses up to 40% of the lateral friction
-  // so fast cornering produces controllable drift.
-  const speedRatio = Math.min(1, Math.abs(vF) / Math.max(1, stats.speed));
-  const gripFactor = 1.0 - 0.40 * speedRatio;
-  const LATERAL_FRICTION = 7.5;
-  const correctedLateral = lateralVel * Math.exp(-LATERAL_FRICTION * gripFactor * dt);
+  const sinH = Math.sin(world.heading);
+  const cosH = Math.cos(world.heading);
 
-  // Reassemble world velocity: forward driven by vF (throttle/coast/brake),
-  // lateral preserved by the damped slip component.
-  world.carVx = newFwdX * vF + newRightX * correctedLateral;
-  world.carVy = newFwdY * vF + newRightY * correctedLateral;
+  world.carVx = sinH * vF;
+  world.carVy = -cosH * vF;
 
-  // Alignment: bias velocity vector toward the nose direction over time so
-  // the car re-tracks after a slide. Reinforces lateral friction on top of
-  // the per-tick exponential damp.
-  const ALIGNMENT_STRENGTH = 4.0;
-  const desiredVx = newFwdX * vF;
-  const desiredVy = newFwdY * vF;
-  world.carVx += (desiredVx - world.carVx) * ALIGNMENT_STRENGTH * dt;
-  world.carVy += (desiredVy - world.carVy) * ALIGNMENT_STRENGTH * dt;
-
-  // Position integrates from the PERSISTENT velocity, not vF * heading.
-  // This is what gives the car real momentum through turns.
   world.carX += world.carVx * dt;
   world.carY += world.carVy * dt;
-  world.forwardV = vF;
 
+  world.forwardV = vF;
   world.speed = world.forwardV;
-  // Smooth normalized momentum 0..1 for HUD readout (keeps bar from jittering).
-  const speedNow = Math.hypot(world.carVx, world.carVy);
+
+  const speedNow = Math.abs(vF);
   const targetMomentum = Math.min(1, speedNow / Math.max(1, stats.speed));
-  const mLerp = 1 - Math.pow(0.1, dt);
-  world.momentum += (targetMomentum - world.momentum) * mLerp;
+  const momentumLerp = 1 - Math.pow(0.1, dt);
+  world.momentum += (targetMomentum - world.momentum) * momentumLerp;
+
   const bumperBonus = isNitro ? 2 : 1;
 
   world.spawnTimer -= dt;
   const spawnEvery = Math.max(0.08, 1.2 - world.wave * 0.05);
-  while (world.spawnTimer <= 0) { spawnZombie(world, false); world.spawnTimer += spawnEvery; }
+
+  while (world.spawnTimer <= 0) {
+    spawnZombie(world, false);
+    world.spawnTimer += spawnEvery;
+  }
+
   if (world.wave >= 8 && world.kills >= world.nextBossKills) {
     spawnZombie(world, true);
     world.nextBossKills += 200 + world.wave * 30;
   }
 
-  // Unified zombie integrator. Each archetype contributes only its `intent`
-  // scalar (-1.5..+1.5, see intentFor) -- the movement loop itself is the
-  // same for everyone. Vel lerps toward target via 1 - exp(-k*dt), then
-  // position integrates as pos += vel * dt. Identical pattern to the player
-  // car so feel reads consistently across archetypes.
-  const zMoveAlpha = 1 - Math.exp(-TUNING.ZOMBIE_MOVE_LERP_K * dt);
+  const zombieMoveAlpha = 1 - Math.exp(-TUNING.ZOMBIE_MOVE_LERP_K * dt);
+
   for (const z of world.zombies) {
     const dx = world.carX - z.x;
     const dy = world.carY - z.y;
     const dst = Math.hypot(dx, dy) || 1;
     const def = ZOMBIE_DEFS[z.kind];
     const intent = intentFor(z, dst);
+
     const targetVx = (dx / dst) * def.speed * intent;
     const targetVy = (dy / dst) * def.speed * intent;
-    z.vx += (targetVx - z.vx) * zMoveAlpha;
-    z.vy += (targetVy - z.vy) * zMoveAlpha;
+
+    z.vx += (targetVx - z.vx) * zombieMoveAlpha;
+    z.vy += (targetVy - z.vy) * zombieMoveAlpha;
     z.x += z.vx * dt;
     z.y += z.vy * dt;
   }
 
   if (weapon.id !== 'none' && input.fire) {
     world.fireTimer -= dt * 1000;
+
     while (world.fireTimer <= 0) {
       fireWeapon(world, weapon, vehicle);
       world.fireTimer += weapon.fireRateMs;
@@ -418,12 +327,14 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     y1: world.carY - vehicle.height / 2,
     y2: world.carY + vehicle.height / 2,
   };
+
   const sideBoxL = sideMod.reach > 0 && {
     x1: carBox.x1 - sideMod.reach,
     x2: carBox.x1,
     y1: carBox.y1 + 10,
     y2: carBox.y2 - 10,
   };
+
   const sideBoxR = sideMod.reach > 0 && {
     x1: carBox.x2,
     x2: carBox.x2 + sideMod.reach,
@@ -431,9 +342,10 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     y2: carBox.y2 - 10,
   };
 
-  // Decay per-zombie attack cooldowns (used for cluster damage).
   for (const z of world.zombies) {
-    if (z.attackCooldown > 0) z.attackCooldown = Math.max(0, z.attackCooldown - dt);
+    if (z.attackCooldown > 0) {
+      z.attackCooldown = Math.max(0, z.attackCooldown - dt);
+    }
   }
 
   const carSpeed = Math.hypot(world.carVx, world.carVy);
@@ -441,36 +353,46 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
   for (const z of world.zombies) {
     if (z.hp <= 0) continue;
+
     const def = ZOMBIE_DEFS[z.kind];
 
     if (z.x + z.size > carBox.x1 && z.x - z.size < carBox.x2 && z.y + z.size > carBox.y1 && z.y - z.size < carBox.y2) {
       if (isImpact) {
-        // Real ram: damage scales with impact speed; zombie gets knockback impulse.
         const speedScale = Math.max(1, Math.min(2, carSpeed / Math.max(1, stats.speed * 0.4)));
         z.hp -= stats.bumperDamage * bumperBonus * speedScale;
+
         const inv = 1 / Math.max(1, carSpeed);
-        const kb = 80 + speedScale * 40;
-        z.vx += (world.carVx * inv) * kb;
-        z.vy += (world.carVy * inv) * kb;
+        const knockback = 80 + speedScale * 40;
+
+        z.vx += (world.carVx * inv) * knockback;
+        z.vy += (world.carVy * inv) * knockback;
+
         if (z.hp <= 0) {
           world.shake = Math.min(24, world.shake + 2 + speedScale);
           registerKill(world, z);
         }
+
         if (!isShielded && world.invuln <= 0) {
           world.hp -= def.contactDamage * 0.4;
           world.invuln = 120;
         }
       } else {
-        // Slow / stalled: zombie does NOT die. Pushes the car (drag) and damages it.
         world.carVx *= Math.pow(0.4, dt);
         world.carVy *= Math.pow(0.4, dt);
+        world.forwardV *= Math.pow(0.4, dt);
+
         if (z.attackCooldown <= 0) {
-          if (!isShielded) world.hp -= def.contactDamage * 0.6;
+          if (!isShielded) {
+            world.hp -= def.contactDamage * 0.6;
+          }
+
           z.attackCooldown = 0.5;
           world.shake = Math.min(20, world.shake + 0.6);
         }
+
         world.streak = 0;
       }
+
       continue;
     }
 
@@ -479,6 +401,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
       if (z.hp <= 0) registerKill(world, z);
       continue;
     }
+
     if (sideBoxR && hits(z, sideBoxR)) {
       z.hp -= sideMod.damage;
       if (z.hp <= 0) registerKill(world, z);
@@ -487,30 +410,47 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
   for (const pr of world.projectiles) {
     if (pr.life <= 0) continue;
+
     for (const z of world.zombies) {
       if (z.hp <= 0) continue;
+
       const dx = pr.x - z.x;
       const dy = pr.y - z.y;
+
       if (dx * dx + dy * dy < (z.size + 4) * (z.size + 4)) {
         z.hp -= pr.damage;
-        if (pr.kind !== 'laser') pr.life = -1;
-        if (z.hp <= 0) registerKill(world, z);
+
+        if (pr.kind !== 'laser') {
+          pr.life = -1;
+        }
+
+        if (z.hp <= 0) {
+          registerKill(world, z);
+        }
+
         if (pr.kind !== 'laser') break;
       }
     }
   }
 
   const despawnSq = 1400 * 1400;
+
   world.zombies = world.zombies.filter((z) => {
     if (z.hp <= 0) return false;
-    const ddx = z.x - world.carX;
-    const ddy = z.y - world.carY;
-    return ddx * ddx + ddy * ddy < despawnSq;
+
+    const dx = z.x - world.carX;
+    const dy = z.y - world.carY;
+
+    return dx * dx + dy * dy < despawnSq;
   });
+
   world.projectiles = world.projectiles.filter((p) => p.life > 0);
   world.bloodSpots = world.bloodSpots.filter((b) => b.alpha > 0);
 
-  if (world.hp <= 0) { world.hp = 0; world.gameOver = true; }
+  if (world.hp <= 0) {
+    world.hp = 0;
+    world.gameOver = true;
+  }
 }
 
 function hits(z: Zombie, box: { x1: number; x2: number; y1: number; y2: number }): boolean {
@@ -520,24 +460,35 @@ function hits(z: Zombie, box: { x1: number; x2: number; y1: number; y2: number }
 function registerKill(world: World, z: Zombie): void {
   world.kills += 1;
   world.streak += 1;
-  if (world.streak > world.bestStreak) world.bestStreak = world.streak;
+
+  if (world.streak > world.bestStreak) {
+    world.bestStreak = world.streak;
+  }
+
   world.streakIdleTimer = 0;
   spawnBlood(world, z);
-  if (world.streak >= 10) world.hp = Math.min(world.maxHp, world.hp + 0.3);
+
+  if (world.streak >= 10) {
+    world.hp = Math.min(world.maxHp, world.hp + 0.3);
+  }
+
   const prev = world.streak - 1;
   let banner: StreakBannerKind = null;
+
   if (prev < 100 && world.streak >= 100) banner = 'apocalypse';
   else if (prev < 50 && world.streak >= 50) banner = 'breaker';
   else if (prev < 25 && world.streak >= 25) banner = 'reaper';
   else if (prev < 10 && world.streak >= 10) banner = 'spree';
+
   if (banner) {
     world.streakBannerKind = banner;
-    world.streakBannerAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    world.streakBannerAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
   }
 }
 
 function spawnBlood(world: World, z: Zombie): void {
   const count = z.kind === 'boss' ? 6 : z.kind === 'brute' ? 3 : 2;
+
   for (let i = 0; i < count; i++) {
     world.bloodSpots.push({
       id: world.nextEntityId++,
@@ -549,18 +500,19 @@ function spawnBlood(world: World, z: Zombie): void {
   }
 }
 
-// Per-archetype movement intent in the (-1.5, +1.5) range. Magnitude scales
-// def.speed; sign chooses forward (toward player) vs. backward (kiting).
-// Default = full pursuit. Override per kind when an archetype wants
-// distinct behavior (sniper holding range, kiter retreating up close, etc.).
 function intentFor(z: Zombie, dst: number): number {
   switch (z.kind) {
-    case 'runner': return 1.1;            // sprints in
-    case 'brute':  return 0.85;           // heavier, slightly slower than peak
-    case 'spitter': return dst < 180 ? -0.6 : (dst > 360 ? 0.4 : 1.0); // kites in close, paces at range
-    case 'boss':   return 0.9;            // intimidating cruise
+    case 'runner':
+      return 1.1;
+    case 'brute':
+      return 0.85;
+    case 'spitter':
+      return dst < 180 ? -0.6 : dst > 360 ? 0.4 : 1.0;
+    case 'boss':
+      return 0.9;
     case 'walker':
-    default:       return 1.0;
+    default:
+      return 1.0;
   }
 }
 
@@ -568,34 +520,51 @@ function spawnZombie(world: World, forceBoss: boolean): void {
   const kind = forceBoss ? 'boss' : pickZombieKind(world.wave);
   const def = ZOMBIE_DEFS[kind];
 
-  // Bounded rejection sampling: roll a position on the spawn ring; if it
-  // lands within SPAWN_MIN_DIST of an existing zombie, reroll. Cap at
-  // SPAWN_MAX_RETRIES and accept the last candidate even if it's still
-  // close -- better a slightly-stacked spawn than a skipped spawn.
-  let x = 0, y = 0;
+  let x = 0;
+  let y = 0;
   const minDistSq = TUNING.SPAWN_MIN_DIST * TUNING.SPAWN_MIN_DIST;
+
   for (let attempt = 0; attempt <= TUNING.SPAWN_MAX_RETRIES; attempt++) {
     const angle = Math.random() * Math.PI * 2;
     x = world.carX + Math.cos(angle) * TUNING.SPAWN_RING_RADIUS;
     y = world.carY + Math.sin(angle) * TUNING.SPAWN_RING_RADIUS;
+
     let tooClose = false;
+
     for (const other of world.zombies) {
-      const ddx = x - other.x;
-      const ddy = y - other.y;
-      if (ddx * ddx + ddy * ddy < minDistSq) { tooClose = true; break; }
+      const dx = x - other.x;
+      const dy = y - other.y;
+
+      if (dx * dx + dy * dy < minDistSq) {
+        tooClose = true;
+        break;
+      }
     }
+
     if (!tooClose) break;
   }
 
   const dx = world.carX - x;
   const dy = world.carY - y;
   const dist = Math.hypot(dx, dy) || 1;
-  // Seed velocity toward the player so the first tick already moves inward
-  // (the per-tick integrator will lerp toward the intent-scaled target).
+
   const vx = (dx / dist) * def.speed * 0.5;
   const vy = (dy / dist) * def.speed * 0.5;
   const hp = def.hp + world.wave * (kind === 'boss' ? 40 : 4);
-  const z: Zombie = { id: world.nextEntityId++, x, y, vx, vy, hp, maxHp: hp, kind, size: def.size, attackCooldown: 0 };
+
+  const z: Zombie = {
+    id: world.nextEntityId++,
+    x,
+    y,
+    vx,
+    vy,
+    hp,
+    maxHp: hp,
+    kind,
+    size: def.size,
+    attackCooldown: 0,
+  };
+
   world.zombies.push(z);
 }
 
@@ -605,25 +574,33 @@ function fireWeapon(world: World, weapon: Weapon, vehicle: Vehicle): void {
   const muzzleDist = vehicle.height / 2 + 4;
   const ox = world.carX + fwdX * muzzleDist;
   const oy = world.carY + fwdY * muzzleDist;
+
   switch (weapon.id) {
     case 'mg':
       world.projectiles.push(makeProj(world, 'mg', ox, oy, fwdX * 700, fwdY * 700, weapon.damage, 1.2));
       break;
+
     case 'flame':
       for (let i = -1; i <= 1; i++) {
         const angle = world.heading + i * 0.25;
-        const sx = Math.sin(angle), sy = -Math.cos(angle);
+        const sx = Math.sin(angle);
+        const sy = -Math.cos(angle);
+
         world.projectiles.push(makeProj(world, 'flame', ox, oy, sx * 380, sy * 380, weapon.damage, 0.45));
       }
       break;
+
     case 'rockets': {
       const sideX = Math.cos(world.heading);
       const sideY = Math.sin(world.heading);
+
       world.projectiles.push(makeProj(world, 'rocket', ox - sideX * 12, oy - sideY * 12, fwdX * 520, fwdY * 520, weapon.damage, 1.5));
       world.projectiles.push(makeProj(world, 'rocket', ox + sideX * 12, oy + sideY * 12, fwdX * 520, fwdY * 520, weapon.damage, 1.5));
+
       world.shake = Math.min(20, world.shake + 5);
       break;
     }
+
     case 'laser':
       world.projectiles.push(makeProj(world, 'laser', ox, oy, fwdX * 1400, fwdY * 1400, weapon.damage, 0.4));
       break;
@@ -631,5 +608,15 @@ function fireWeapon(world: World, weapon: Weapon, vehicle: Vehicle): void {
 }
 
 function makeProj(world: World, kind: ProjectileKind, x: number, y: number, vx: number, vy: number, damage: number, life: number): Projectile {
-  return { id: world.nextEntityId++, x, y, vx, vy, hp: 1, damage, life, kind };
+  return {
+    id: world.nextEntityId++,
+    x,
+    y,
+    vx,
+    vy,
+    hp: 1,
+    damage,
+    life,
+    kind,
+  };
 }
