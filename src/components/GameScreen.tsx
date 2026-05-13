@@ -25,15 +25,6 @@ const CAR_LIFT = 1;
 
 const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
 
-// === Chase cam (NFS-style behind-the-car view) ===
-// Camera sits behind the car along its heading, raised by CHASE_HEIGHT,
-// looking at a point CHASE_LOOK_AHEAD units in front of the car. Camera
-// heading lerps toward world.heading at CHASE_HEADING_K per second so
-// sharp turns don't snap the view -- the car visibly rotates on screen
-// for a beat before the camera swings around behind it.
-//
-// Pulled back + raised + look further ahead so the car sits in the
-// LOWER portion of the screen (more road / terrain visible above).
 const CHASE_DISTANCE   = 140;
 const CHASE_HEIGHT     = 85;
 const CHASE_LOOK_AHEAD = 240;
@@ -49,7 +40,6 @@ const CAMERA_CONFIG = {
 
 const HUD_TICK_MS = 100;
 
-// === FRZ-style five-button bottom row ===
 const ARROW_BTN_SIZE = 88;
 const MID_BTN_SIZE   = 68;
 const BUTTON_ROW_GAP = 14;
@@ -360,7 +350,15 @@ function GrassGround({ world }: { world: World }) {
   useFrame(() => {
     if (!meshRef.current) return;
     meshRef.current.position.set(world.carX, 0, world.carY);
-    tex.offset.set(world.carX / 100, world.carY / 100);
+    // Texture offset: positive X correlates with world +X (correct),
+    // but world.carY maps to three.js Z and the plane is rotated -PI/2
+    // around X, so plane-local +V points to world -Z. To make the
+    // texture appear WORLD-LOCKED (ground stays put in world space
+    // while the player drives over it), offset.y must use the NEGATED
+    // car Y. Without the negation, the ground appears to flow AWAY
+    // from the player when driving forward; with it, the ground flows
+    // toward the player as expected.
+    tex.offset.set(world.carX / 100, -world.carY / 100);
   });
   return (
     <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
@@ -487,12 +485,6 @@ function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     if (!outer.current || !inner.current) return;
     const carY = model ? VEH_GLB_Y : CAR_DEPTH / 2 + CAR_LIFT;
     outer.current.position.set(world.carX, carY, world.carY);
-    // Kenney vehicle GLBs are authored facing +Z in their local frame,
-    // but the engine treats world.heading=0 as facing -Z (forward = -Y in
-    // world coords, mapped to -Z in three.js). Adding PI flips the model
-    // 180 degrees around its vertical axis so its NOSE points in the
-    // direction of motion (and the chase cam sees its tail lights, not
-    // its headlights, while driving forward).
     outer.current.rotation.y = -world.heading + Math.PI;
 
     const safeDt = Math.max(0.001, dt);
