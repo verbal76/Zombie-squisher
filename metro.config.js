@@ -17,6 +17,9 @@
 // ships embedded.
 // Bump 2026-05-13c: trigger APK so the SINGLE-STICK control scheme
 // ships embedded (gas/brake buttons removed; stick Y is throttle axis).
+// Bump 2026-05-13d: trigger APK so the PHYSICAL VEHICLE MODEL ships
+// embedded -- traction, angular inertia, persistent velocity, lateral
+// friction, alignment, response curves per the lead-developer spec.
 
 const { getDefaultConfig } = require('expo/metro-config');
 

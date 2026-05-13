@@ -19,6 +19,8 @@ export interface World {
   carVy: number;
   /** Smoothed steering input -1..1 (lags raw wheel input to model wheel inertia). */
   steeringAngle: number;
+  /** Heading angular velocity (rad/s). Steering applies torque; damping pulls back. */
+  angularVelocity: number;
   scroll: number;
   speed: number;
   zombies: Zombie[];
@@ -122,6 +124,7 @@ export function createWorld(width: number, height: number, p: Progress): World {
     carVx: 0,
     carVy: 0,
     steeringAngle: 0,
+    angularVelocity: 0,
     scroll: 0,
     speed: 0,
     zombies: [],
@@ -209,14 +212,14 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const REVERSE_HOLD_SECONDS = 1.0;             // longer hold before brake engages reverse
   const REVERSE_ACCEL_FACTOR = 0.5;             // reverse is torque-limited, slower than forward
 
-  // Mario-Kart-style car model:
-  //   - Heading turn rate is stick-driven directly, scaled by speed.
-  //     Activation gate at v=0 means stationary stick input does NOT rotate
-  //     the car (no spinning sprite). Above v=0 the car turns at a tight,
-  //     responsive rate.
-  //   - NO lateral velocity. Position is always vF along the heading — no
-  //     slip, no drift, no sliding sideways during turns. The velocity vector
-  //     is locked to the nose.
+  // Physical vehicle model (per spec: traction + angular inertia + persistent velocity):
+  //   - Heading rotates via angular velocity (rotational inertia). Stick
+  //     applies a torque; angular velocity damps back to zero over time.
+  //   - Velocity is PERSISTENT — it isn't overwritten from heading each frame.
+  //     Lateral momentum decays via lateral friction (speed-dependent grip
+  //     loss) and is pulled toward the heading direction by an alignment term.
+  //   - Position integrates from the persistent velocity, so the car carries
+  //     real momentum through turns instead of teleporting along its nose.
   //   - Brake → reverse is a 3-phase progression: braking force, near-stop
   //     hold, then reverse engagement after 1 s of holding brake at zero.
   //   - Forward acceleration curve is nonlinear (torque-strong at launch,
@@ -233,11 +236,16 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   let vR = world.carVx * rightX + world.carVy * rightY;
 
   // Decompose the throttle axis (stick Y) into forward and brake magnitudes.
-  // Below STICK_DEADZONE the stick is treated as centered (coast).
-  const STICK_DEADZONE = 0.08;
-  const axis = input.throttleAxis;
-  const throttleMag = axis >  STICK_DEADZONE ?  axis : 0;
-  const brakeMag    = axis < -STICK_DEADZONE ? -axis : 0;
+  // STICK_DEADZONE is a hard center band; past it, magnitude is rescaled so
+  // axis = STICK_DEADZONE -> 0, axis = 1 -> 1 (analog all the way through).
+  const STICK_DEADZONE = 0.15;
+  const axisRaw = input.throttleAxis;
+  const axisAbs = Math.abs(axisRaw);
+  const axisAdj = axisAbs < STICK_DEADZONE
+    ? 0
+    : (axisAbs - STICK_DEADZONE) / (1 - STICK_DEADZONE);
+  const throttleMag = axisRaw > 0 ? axisAdj : 0;
+  const brakeMag    = axisRaw < 0 ? axisAdj : 0;
 
   if (brakeMag > 0) {
     if (vF > 0.5) {
@@ -266,49 +274,86 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     vF = Math.min(maxSpeed, vF + stats.acceleration * nitroMul * torqueFactor * throttleMag * dt);
     world.brakeHoldTimer = 0;
   } else {
-    // Coast: long half-life so the car carries momentum forward when the
-    // stick re-centers. ~4 s half-life.
-    vF *= Math.pow(0.5, dt / 4.0);
+    // Coast: 1.5 s half-life. Tighter than the old 4 s glide so letting off
+    // the stick produces a noticeable deceleration (less ice-skating feel).
+    vF *= Math.pow(0.5, dt / 1.5);
     if (Math.abs(vF) < 0.5) vF = 0;
     world.brakeHoldTimer = 0;
   }
 
-  // --- Mario-Kart steering ---
-  // Deadzone so a near-centered stick doesn't twitch the wheels.
-  const rawWheel = Math.abs(input.wheel) < 0.06 ? 0 : input.wheel;
+  // --- Physical steering: torque → angular velocity → heading ---
+  // Wheel input: small deadzone + pow(1.5) response curve for fine center
+  // control while preserving full magnitude at the rim.
+  const wheelShaped = Math.sign(input.wheel) * Math.pow(Math.abs(input.wheel), 1.5);
+  const rawWheel = Math.abs(wheelShaped) < 0.05 ? 0 : wheelShaped;
 
   // Mirror stick into world.steeringAngle for the body-roll animation in
   // CarMesh (which reads world.steeringAngle * speedNorm * 0.18 for tilt).
-  const wheelLerp = 1 - Math.pow(0.08, dt);
+  const wheelLerp = 1 - Math.pow(0.02, dt);
   world.steeringAngle += (rawWheel - world.steeringAngle) * wheelLerp;
 
-  // Activation gate: at v=0 the car cannot rotate. The gate ramps from 0
-  // at standstill up to 1 at TURN_ACTIVATION_SPEED so the car can pivot
-  // off the line but cannot spin in place like a sprite.
+  // Turn authority: a baseline 0.25 at standstill so the car can pivot off
+  // the line, ramping to 1.0 above TURN_ACTIVATION_SPEED. Different from the
+  // pure-zero activation gate of the Mario-Kart model.
   const TURN_ACTIVATION_SPEED = 25;
-  const turnActivation = Math.min(1, Math.abs(vF) / TURN_ACTIVATION_SPEED);
+  const MIN_TURN_AUTHORITY = 0.25;
+  const turnActivation = MIN_TURN_AUTHORITY +
+    (1 - MIN_TURN_AUTHORITY) * Math.min(1, Math.abs(vF) / TURN_ACTIVATION_SPEED);
 
-  // Speed-scaled turn rate: tight at low speed, slightly looser at top so
-  // the car can carve fast turns without rolling the heading aggressively.
-  const BASE_TURN_RATE = 2.5;        // rad/s at full stick, full activation
-  const HIGH_SPEED_TURN_DROP = 0.30; // top-speed loses 30% of the turn rate
-  const speedFracForTurn = Math.min(1, Math.abs(vF) / Math.max(1, stats.speed));
-  const turnSpeedFactor = 1 - HIGH_SPEED_TURN_DROP * speedFracForTurn;
+  // Reverse-blend: smoothly transition the steering sign across vF=0 so the
+  // car doesn't twitch when crossing into reverse. Magnitude is reduced
+  // (-0.5 vs +1) so reverse steering is less aggressive than forward.
+  const reverseBlend = Math.max(-1, Math.min(1, vF / 40));
+  const turnSign = reverseBlend >= 0 ? 1 : -0.5;
 
-  // Flip stick when reversing so right-stick keeps meaning right-turn.
-  const turnSign = vF >= 0 ? 1 : -1;
+  // Apply torque to angular velocity, damp, then integrate heading. The
+  // damping is what gives the chassis its "weight" — released stick decays
+  // smoothly rather than snapping back.
+  const BASE_TURN_RATE = 2.0;
+  const ANGULAR_ACCEL_GAIN = 5.0;
+  const ANGULAR_DAMPING = 6.0;
+  const steeringTorque = rawWheel * BASE_TURN_RATE * turnActivation * turnSign;
+  world.angularVelocity += steeringTorque * ANGULAR_ACCEL_GAIN * dt;
+  world.angularVelocity *= Math.exp(-ANGULAR_DAMPING * dt);
+  world.heading += world.angularVelocity * dt;
 
-  const omega = rawWheel * BASE_TURN_RATE * turnActivation * turnSpeedFactor * turnSign;
-  world.heading += omega * dt;
-
-  // No lateral velocity. Position is always vF along the new heading,
-  // period. Velocity vector is locked to the nose — no slip, no drift.
+  // --- Persistent velocity + lateral friction + heading alignment ---
   const newSinH = Math.sin(world.heading);
   const newCosH = Math.cos(world.heading);
-  world.carX += vF * newSinH * dt;
-  world.carY += vF * -newCosH * dt;
-  world.carVx = vF * newSinH;
-  world.carVy = vF * -newCosH;
+  const newFwdX = newSinH;
+  const newFwdY = -newCosH;
+  const newRightX = newCosH;
+  const newRightY = newSinH;
+
+  // Decompose CURRENT world velocity against the NEW heading to extract
+  // the lateral (slip) component.
+  const lateralVel = world.carVx * newRightX + world.carVy * newRightY;
+
+  // Speed-dependent grip: high speed loses up to 40% of the lateral friction
+  // so fast cornering produces controllable drift.
+  const speedRatio = Math.min(1, Math.abs(vF) / Math.max(1, stats.speed));
+  const gripFactor = 1.0 - 0.40 * speedRatio;
+  const LATERAL_FRICTION = 7.5;
+  const correctedLateral = lateralVel * Math.exp(-LATERAL_FRICTION * gripFactor * dt);
+
+  // Reassemble world velocity: forward driven by vF (throttle/coast/brake),
+  // lateral preserved by the damped slip component.
+  world.carVx = newFwdX * vF + newRightX * correctedLateral;
+  world.carVy = newFwdY * vF + newRightY * correctedLateral;
+
+  // Alignment: bias velocity vector toward the nose direction over time so
+  // the car re-tracks after a slide. Reinforces lateral friction on top of
+  // the per-tick exponential damp.
+  const ALIGNMENT_STRENGTH = 4.0;
+  const desiredVx = newFwdX * vF;
+  const desiredVy = newFwdY * vF;
+  world.carVx += (desiredVx - world.carVx) * ALIGNMENT_STRENGTH * dt;
+  world.carVy += (desiredVy - world.carVy) * ALIGNMENT_STRENGTH * dt;
+
+  // Position integrates from the PERSISTENT velocity, not vF * heading.
+  // This is what gives the car real momentum through turns.
+  world.carX += world.carVx * dt;
+  world.carY += world.carVy * dt;
   world.forwardV = vF;
 
   world.speed = world.forwardV;
