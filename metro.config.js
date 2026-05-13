@@ -8,16 +8,15 @@
 // module reference rather than failing the build.
 // Build trigger: 2026-05-10 / driving overhaul slice (build #45).
 // Bump 2026-05-11: force fresh APK so the fetch()->expo-file-system GLB
-// fix ships in the embedded bundle (OTAs are not reliably reaching some
-// devices; baking the fix into the APK avoids the OTA dependency).
+// fix ships in the embedded bundle.
 // Bump 2026-05-12: trigger APK so the GLB-JSON full-texture-strip fix
-// (fb0b25d) ships embedded -- devices without the latest OTA will still
-// load Kenney vehicle/character meshes correctly.
+// ships embedded.
 // Bump 2026-05-13a: trigger APK so the bicycle-model steering rewrite
 // ships embedded.
 // Bump 2026-05-13b: trigger APK so the Mario-Kart steering rewrite
-// ships embedded (replaces bicycle model -- direct stick-to-omega
-// with v=0 activation gate, zero lateral velocity, no slip).
+// ships embedded.
+// Bump 2026-05-13c: trigger APK so the SINGLE-STICK control scheme
+// ships embedded (gas/brake buttons removed; stick Y is throttle axis).
 
 const { getDefaultConfig } = require('expo/metro-config');
 

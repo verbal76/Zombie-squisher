@@ -48,14 +48,13 @@ const CAMERA_CONFIG = {
 
 const HUD_TICK_MS = 100;
 
-const BTN_GAS_X = 0;
-const BTN_GAS_Y = BTN_SIZE + BTN_GAP;
-const BTN_FIRE_X = BTN_SIZE + BTN_GAP;
+// Single-stick controls: stick Y is the throttle/brake/reverse axis, stick X
+// is the turn axis. The right-side cluster now only hosts the FIRE button;
+// the ability button stays in its top-right slot.
+const BTN_FIRE_X = 0;
 const BTN_FIRE_Y = 0;
-const BTN_BRAKE_X = BTN_SIZE + BTN_GAP;
-const BTN_BRAKE_Y = BTN_SIZE + BTN_GAP;
-const CLUSTER_W = BTN_SIZE * 2 + BTN_GAP;
-const CLUSTER_H = BTN_SIZE * 2 + BTN_GAP;
+const CLUSTER_W = BTN_SIZE;
+const CLUSTER_H = BTN_SIZE;
 
 const STICK_KNOB_SIZE = Math.round(WHEEL_SIZE * 0.42);
 const STICK_MAX_OFFSET = WHEEL_SIZE / 2 - STICK_KNOB_SIZE / 2 - 4;
@@ -65,8 +64,9 @@ const CONTROL_OVERLAY_H = Math.max(WHEEL_SIZE, CLUSTER_H) + MARGIN * 2;
 export function GameScreen({ progress, onEnd }: Props) {
   const worldRef = useRef<World>(createWorld(ARENA_W, ARENA_H, progress));
   const wheelRef = useRef(0);
-  const throttleRef = useRef(false);
-  const brakeRef = useRef(false);
+  // Single-stick throttle axis. Positive = forward throttle, negative = brake/reverse.
+  // Magnitude (0..1) is proportional to how far the stick is pushed.
+  const throttleAxisRef = useRef(0);
   const fireRef = useRef(false);
   const abilityTriggerRef = useRef(false);
   const [, setTick] = useState(0);
@@ -88,8 +88,7 @@ export function GameScreen({ progress, onEnd }: Props) {
       const w = worldRef.current;
       step(w, dt, {
         wheel: wheelRef.current,
-        throttle: throttleRef.current,
-        brake: brakeRef.current,
+        throttleAxis: throttleAxisRef.current,
         fire: fireRef.current,
         triggerAbility: abilityTriggerRef.current,
       }, progress);
@@ -127,8 +126,6 @@ export function GameScreen({ progress, onEnd }: Props) {
     const clusterY0 = overlayH - MARGIN - CLUSTER_H;
 
     let fire = false;
-    let gas = false;
-    let brake = false;
     let stickFound = false;
 
     for (let i = 0; i < touches.length; i++) {
@@ -149,6 +146,10 @@ export function GameScreen({ progress, onEnd }: Props) {
           }
           stickRef.current?.setKnob(cx, cy);
           wheelRef.current = Math.max(-1, Math.min(1, cx / STICK_MAX_OFFSET));
+          // Stick UP on the screen is negative Y. Throttle axis is positive
+          // when pushing up (forward throttle) and negative when pulling
+          // down (brake/reverse).
+          throttleAxisRef.current = Math.max(-1, Math.min(1, -cy / STICK_MAX_OFFSET));
           stickFound = true;
           continue;
         }
@@ -158,27 +159,23 @@ export function GameScreen({ progress, onEnd }: Props) {
       const by = y - clusterY0;
       if (bx >= 0 && bx <= CLUSTER_W && by >= 0 && by <= CLUSTER_H) {
         if (bx >= BTN_FIRE_X && bx <= BTN_FIRE_X + BTN_SIZE && by >= BTN_FIRE_Y && by <= BTN_FIRE_Y + BTN_SIZE) fire = true;
-        if (bx >= BTN_GAS_X && bx <= BTN_GAS_X + BTN_SIZE && by >= BTN_GAS_Y && by <= BTN_GAS_Y + BTN_SIZE) gas = true;
-        if (bx >= BTN_BRAKE_X && bx <= BTN_BRAKE_X + BTN_SIZE && by >= BTN_BRAKE_Y && by <= BTN_BRAKE_Y + BTN_SIZE) brake = true;
       }
     }
 
     if (!stickFound) {
       stickRef.current?.springHome();
       wheelRef.current = 0;
+      throttleAxisRef.current = 0;
     }
 
     fireRef.current = fire;
-    throttleRef.current = gas;
-    brakeRef.current = brake;
   };
 
   const releaseAllControls = () => {
     stickRef.current?.springHome();
     wheelRef.current = 0;
+    throttleAxisRef.current = 0;
     fireRef.current = false;
-    throttleRef.current = false;
-    brakeRef.current = false;
   };
 
   const dbgCar = `car (${w.carX.toFixed(0)}, ${w.carY.toFixed(0)})  hd=${w.heading.toFixed(2)}  v=${w.forwardV.toFixed(0)}`;
@@ -276,12 +273,6 @@ export function GameScreen({ progress, onEnd }: Props) {
         >
           <View style={[styles.btn, styles.btnFire, { left: BTN_FIRE_X, top: BTN_FIRE_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
             <Text style={styles.btnText}>FIRE</Text>
-          </View>
-          <View style={[styles.btn, styles.btnGas, { left: BTN_GAS_X, top: BTN_GAS_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
-            <Text style={styles.btnText}>GAS</Text>
-          </View>
-          <View style={[styles.btn, styles.btnBrake, { left: BTN_BRAKE_X, top: BTN_BRAKE_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
-            <Text style={styles.btnText}>BRAKE</Text>
           </View>
         </View>
       </View>
@@ -597,8 +588,6 @@ const styles = StyleSheet.create({
   gear: { position: 'absolute', right: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(26,26,26,0.85)', borderWidth: 2, borderColor: '#2a2a2a', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   gearIcon: { color: '#ffd24a', fontSize: 22, lineHeight: 26 },
   btn: { position: 'absolute', borderRadius: 16, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  btnGas: { backgroundColor: 'rgba(60,180,90,0.85)', borderColor: '#0a3a18' },
-  btnBrake: { backgroundColor: 'rgba(220,80,80,0.85)', borderColor: '#3a0a0a' },
   btnFire: { backgroundColor: 'rgba(255,180,40,0.9)', borderColor: '#3a2a00' },
   btnText: { color: '#000', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
   abilityBtn: { position: 'absolute', right: 16, top: 80, backgroundColor: '#222', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 2, borderColor: '#ffd24a', minWidth: 110, alignItems: 'center' },

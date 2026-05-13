@@ -150,10 +150,15 @@ export function createWorld(width: number, height: number, p: Progress): World {
 }
 
 export interface UpdateInput {
-  /** -1..1 — turn input from steering wheel (negative = left). */
+  /** -1..1 — turn input from stick X (negative = left). */
   wheel: number;
-  throttle: boolean;
-  brake: boolean;
+  /**
+   * -1..1 — throttle axis driven by stick Y. Positive = forward throttle
+   * (magnitude is proportional), negative = brake / reverse throttle.
+   * Replaces the old throttle/brake boolean pair so a single thumbstick
+   * controls direction, speed, and reverse together.
+   */
+  throttleAxis: number;
   fire: boolean;
   triggerAbility: boolean;
 }
@@ -227,38 +232,42 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   let vF = world.carVx * fwdX + world.carVy * fwdY;
   let vR = world.carVx * rightX + world.carVy * rightY;
 
-  // Phase the brake input into 3 distinct behaviors.
-  if (input.brake) {
+  // Decompose the throttle axis (stick Y) into forward and brake magnitudes.
+  // Below STICK_DEADZONE the stick is treated as centered (coast).
+  const STICK_DEADZONE = 0.08;
+  const axis = input.throttleAxis;
+  const throttleMag = axis >  STICK_DEADZONE ?  axis : 0;
+  const brakeMag    = axis < -STICK_DEADZONE ? -axis : 0;
+
+  if (brakeMag > 0) {
     if (vF > 0.5) {
-      // Phase 1: real braking — strong negative force on forward velocity.
-      vF = Math.max(0, vF - stats.brakeStrength * dt);
+      // Phase 1: real braking — strong negative force scaled by brake mag.
+      vF = Math.max(0, vF - stats.brakeStrength * brakeMag * dt);
       world.brakeHoldTimer = 0;
     } else if (vF > -0.5) {
-      // Phase 2: near stopped — the brake holds the car still and arms the
-      // reverse timer. We pin vF toward 0 so it doesn't drift away while we
-      // wait. After REVERSE_HOLD_SECONDS, we shift into Phase 3.
+      // Phase 2: near stopped — pin vF toward 0 and arm the reverse timer.
+      // After REVERSE_HOLD_SECONDS of held-down stick at zero, Phase 3 fires.
       vF *= Math.pow(0.05, dt);
       if (Math.abs(vF) < 0.5) vF = 0;
       world.brakeHoldTimer += dt;
       if (world.brakeHoldTimer >= REVERSE_HOLD_SECONDS) {
-        vF = -stats.acceleration * REVERSE_ACCEL_FACTOR * dt;
+        vF = -stats.acceleration * REVERSE_ACCEL_FACTOR * brakeMag * dt;
       }
     } else {
-      // Phase 3: in reverse — brake pedal now acts as reverse throttle
-      // (torque-limited so reverse stays sluggish).
-      vF = Math.max(-maxReverseSpeed, vF - stats.acceleration * REVERSE_ACCEL_FACTOR * dt);
+      // Phase 3: in reverse — stick-down magnitude acts as reverse throttle.
+      vF = Math.max(-maxReverseSpeed, vF - stats.acceleration * REVERSE_ACCEL_FACTOR * brakeMag * dt);
     }
-  } else if (input.throttle) {
+  } else if (throttleMag > 0) {
     // Nonlinear torque curve: strong launch (1.0 at v=0), tapers as a power
-    // curve toward maxSpeed (0.35 at top). Makes early acceleration feel
-    // punchy and top speed feel asymptotic.
+    // curve toward maxSpeed (0.35 at top). Stick magnitude scales the force,
+    // so a half-pushed stick gives half the acceleration.
     const speedFrac = Math.min(1, Math.abs(vF) / Math.max(1, maxSpeed));
     const torqueFactor = 1 - 0.65 * Math.pow(speedFrac, 1.5);
-    vF = Math.min(maxSpeed, vF + stats.acceleration * nitroMul * torqueFactor * dt);
+    vF = Math.min(maxSpeed, vF + stats.acceleration * nitroMul * torqueFactor * throttleMag * dt);
     world.brakeHoldTimer = 0;
   } else {
     // Coast: long half-life so the car carries momentum forward when the
-    // player lifts off the throttle. Was 1.5 s — now ~4 s.
+    // stick re-centers. ~4 s half-life.
     vF *= Math.pow(0.5, dt / 4.0);
     if (Math.abs(vF) < 0.5) vF = 0;
     world.brakeHoldTimer = 0;
