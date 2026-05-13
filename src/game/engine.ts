@@ -54,6 +54,11 @@ export interface World {
 export type StreakBannerKind = 'spree' | 'reaper' | 'breaker' | 'apocalypse' | null;
 export const KILL_SPEED = 50;
 
+// Streak threshold at which zombies switch from chase mode to flee mode.
+// 10 matches the 'spree' banner -- once the player is on a real streak,
+// the horde panics and runs away.
+export const ZOMBIE_FLEE_STREAK = 10;
+
 export const TUNING = {
   ZOMBIE_MOVE_LERP_K: 3.0,
   SPAWN_RING_RADIUS: 750,
@@ -138,15 +143,10 @@ export function createWorld(width: number, height: number, p: Progress): World {
 }
 
 export interface UpdateInput {
-  /** True while the LEFT arrow button is held. */
   steerLeft: boolean;
-  /** True while the RIGHT arrow button is held. */
   steerRight: boolean;
-  /** Current gear, set by tapping F / R buttons. */
   gear: GearState;
-  /** True while the TURBO button is held. */
   turbo: boolean;
-  /** Auto-fire is always on (Vampire-Survivors-style) -- kept on the input for the engine to read. */
   fire: boolean;
   triggerAbility: boolean;
 }
@@ -196,36 +196,9 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const nitroMul = isNitro ? 1.8 : 1;
   const isShielded = world.invuln > 0 && p.selectedAbility === 'shield' && world.abilityActive > 0;
 
-  // === FRZ-style five-button physics ===
-  //
-  // Inputs (boolean flags):
-  //   steerLeft / steerRight -- held to turn at a constant rate while down.
-  //   gear = forward / reverse / neutral -- toggle set by tapping F / R.
-  //   turbo -- held to multiply targetSpeed by TURBO_MULTIPLIER.
-  //
-  // Throttle:
-  //   targetSpeed = (gear==forward ? +maxSpeed : gear==reverse ? -maxReverseSpeed : 0)
-  //   vFwd exp-lerps to targetSpeed at FORWARD_K when accelerating, BRAKE_K
-  //   when the target opposes current motion (transmission jam = harder decel).
-  //
-  // Transmission jam:
-  //   When the player slams F<->R while moving fast, the engine detects the
-  //   gear flip, injects a small lateral kick into vLat (visible skid), and
-  //   the BRAKE_K decel takes over to stop the car before reversing into the
-  //   new direction.
-  //
-  // Steering:
-  //   rawSteer = (steerLeft ? -1 : 0) + (steerRight ? +1 : 0).
-  //   Heading rotates at maxTurnNow * rawSteer rad/s, where maxTurnNow has
-  //   the same speed-dependent authority shape as before (floor 0.25, ramps
-  //   to 1.0 above |v|=70, capped by highSpeedLimit at top speed).
-  //
-  // Position integrates from the persistent 2D velocity, with vLat decaying
-  // turn-dependent (faster going straight, slower during a held turn).
-
   const TURBO_MULTIPLIER = 1.5;
-  const FORWARD_K = 2.5;          // accel/decel toward target when same direction
-  const BRAKE_K   = 8.0;          // decel rate when input opposes motion (transmission jam)
+  const FORWARD_K = 2.5;
+  const BRAKE_K   = 8.0;
   const LAT_GRIP_STRAIGHT = 6.0;
   const LAT_GRIP_TURN     = 2.5;
   const COAST_DAMP        = 0.5;
@@ -235,10 +208,8 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const maxSpeed = stats.speed * nitroMul * turboMul;
   const maxReverseSpeed = stats.speed * 0.4 * turboMul;
 
-  // --- Steering force (instant, no wheel inertia) ---
   const rawSteer = (input.steerLeft ? -1 : 0) + (input.steerRight ? 1 : 0);
 
-  // Body-roll mirror for the visual animation in CarMesh.
   const steerLerp = 1 - Math.pow(0.04, dt);
   world.steeringAngle += (rawSteer - world.steeringAngle) * steerLerp;
 
@@ -256,7 +227,6 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   world.heading += omegaForFrame * dt;
   world.angularVelocity = omegaForFrame;
 
-  // --- Decompose persistent velocity against the NEW heading ---
   const sinH = Math.sin(world.heading);
   const cosH = Math.cos(world.heading);
   const fX = sinH;
@@ -266,15 +236,12 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   let vFwd = world.carVx * fX + world.carVy * fY;
   let vLat = world.carVx * rX + world.carVy * rY;
 
-  // --- Transmission jam: detect gear flip across direction-of-motion ---
   if (input.gear !== world.lastGear) {
     const movingFast = Math.abs(vFwd) > 50;
     const flipped =
       (input.gear === 'forward' && vFwd < -5) ||
       (input.gear === 'reverse' && vFwd > 5);
     if (movingFast && flipped) {
-      // Inject a lateral kick for visible skid. Favor whichever way the
-      // player is currently steering, otherwise random sign.
       const skidDir = rawSteer !== 0 ? rawSteer : (Math.random() < 0.5 ? -1 : 1);
       vLat += skidDir * SKID_INJECTION;
       world.shake = Math.max(world.shake, 3);
@@ -282,7 +249,6 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     world.lastGear = input.gear;
   }
 
-  // --- Throttle: exp-lerp toward gear target ---
   let targetSpeed = 0;
   if (input.gear === 'forward') targetSpeed = maxSpeed;
   else if (input.gear === 'reverse') targetSpeed = -maxReverseSpeed;
@@ -296,12 +262,10 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     vFwd = vFwd + (targetSpeed - vFwd) * (1 - Math.exp(-lerpK * dt));
   }
 
-  // --- Lateral grip: turn-dependent decay ---
   const turningFactor = Math.min(1, Math.abs(rawSteer));
   const latK = LAT_GRIP_STRAIGHT - (LAT_GRIP_STRAIGHT - LAT_GRIP_TURN) * turningFactor;
   vLat = vLat + (0 - vLat) * (1 - Math.exp(-latK * dt));
 
-  // --- Recompose persistent velocity, integrate position ---
   world.carVx = fX * vFwd + rX * vLat;
   world.carVy = fY * vFwd + rY * vLat;
   world.carX += world.carVx * dt;
@@ -337,7 +301,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     const dy = world.carY - z.y;
     const dst = Math.hypot(dx, dy) || 1;
     const def = ZOMBIE_DEFS[z.kind];
-    const intent = intentFor(z, dst);
+    const intent = intentFor(z, dst, world.streak);
 
     const targetVx = (dx / dst) * def.speed * intent;
     const targetVy = (dy / dst) * def.speed * intent;
@@ -548,16 +512,29 @@ function spawnBlood(world: World, z: Zombie): void {
   }
 }
 
-function intentFor(z: Zombie, dst: number): number {
+// Zombie movement intent (-N..+N). Multiplies def.speed when computing each
+// zombie's velocity target. Positive = move toward the car, negative = away.
+//
+// Streak-aware behavior (per request: "consistently going after the car,
+// unless on a streak then they should run from the car"):
+//   streak >= ZOMBIE_FLEE_STREAK (10): all zombies flee at -1.1 (slightly
+//     panicked, faster than their normal chase speed).
+//   otherwise: all kinds chase. Per-kind speed differences come from
+//     def.speed in zombies.ts -- runners are faster, brutes slower, etc.
+//     No kiting/retreating subroutines anymore (used to be in spitter).
+function intentFor(z: Zombie, dst: number, streak: number): number {
+  if (streak >= ZOMBIE_FLEE_STREAK) {
+    return -1.1;
+  }
   switch (z.kind) {
     case 'runner':
       return 1.1;
     case 'brute':
       return 0.85;
-    case 'spitter':
-      return dst < 180 ? -0.6 : dst > 360 ? 0.4 : 1.0;
     case 'boss':
       return 0.9;
+    case 'spitter':
+      return 1.0;
     case 'walker':
     default:
       return 1.0;
