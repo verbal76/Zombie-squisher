@@ -11,26 +11,13 @@
 // fix ships in the embedded bundle.
 // Bump 2026-05-12: trigger APK so the GLB-JSON full-texture-strip fix
 // ships embedded.
-// Bump 2026-05-13a: trigger APK so the bicycle-model steering rewrite
-// ships embedded.
-// Bump 2026-05-13b: trigger APK so the Mario-Kart steering rewrite
-// ships embedded.
-// Bump 2026-05-13c: trigger APK so the SINGLE-STICK control scheme
-// ships embedded.
-// Bump 2026-05-13d: trigger APK so the PHYSICAL VEHICLE MODEL ships
-// embedded.
-// Bump 2026-05-13e: trigger APK so the AUTO-FIRE testing toggle +
-// reverse-gate stick mapping ships embedded.
-// Bump 2026-05-13f: trigger APK so the heading-locked velocity engine
-// ships embedded.
-// Bump 2026-05-13g: trigger APK so DEFAULT_PROGRESS ships with MG
-// unlocked + selected.
-// Bump 2026-05-13h: trigger APK so the OCEAN SPORE-style physics ports
-// ship embedded.
-// Bump 2026-05-13i: re-fire APK after Actions budget restore. The
-// previous build (commit 4647e498) was blocked by the "Actions budget
-// is preventing further use" gate before the runner started. Engine
-// code unchanged; this bump just retriggers the workflow.
+// Bump 2026-05-13a..h: various engine pushes
+// Bump 2026-05-13i: re-fire APK after Actions budget restore.
+// Bump 2026-05-13j: trigger APK so the CAMERA LOOKAHEAD restore +
+// LIVE PHYSICS DEBUG HUD (hd / vF / vL / omega / wh / th) ship
+// embedded. The car will now visibly slide off-center on screen as
+// velocity diverges from heading, and the live HUD lets the user
+// verify the engine math is actually changing per push.
 
 const { getDefaultConfig } = require('expo/metro-config');
 

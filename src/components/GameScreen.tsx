@@ -31,9 +31,11 @@ const MARGIN = 24;
 
 const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
 
-// Pure top-down camera. Setting CAM_OFFSET_X and CAM_OFFSET_Z to 0 puts
-// the camera directly over the car (no isometric tilt). CAM_HEIGHT
-// controls how zoomed-in we are; lower = closer.
+// Pure top-down camera. CAM_HEIGHT controls zoom; lower = closer.
+// CAM_OFFSET_X/Z are kept at 0 because the camera now lerps toward a
+// VELOCITY-LOOKAHEAD focal point in CameraTracker -- the car is no
+// longer pinned to screen center, it slides off-center in the direction
+// of motion so the player has visible feedback that they ARE moving.
 const CAM_OFFSET_X = 0;
 const CAM_HEIGHT = 900;
 const CAM_OFFSET_Z = 0;
@@ -78,14 +80,10 @@ function throttleAxisFromStick(cx: number, cy: number): number {
 
   if (magnitude < STICK_CENTER_DEADZONE) return 0;
 
-  // Stick up (ny < 0) is forward throttle. Magnitude is the Y component so
-  // diagonal pushes still throttle, just at reduced gain.
   if (ny < 0) {
     return Math.min(1, -ny);
   }
 
-  // Stick down: only engage brake/reverse when the player aims for it. Must
-  // be within a narrow cone of straight-down AND past the minimum pull.
   const angleFromDownDegrees = Math.abs(Math.atan2(nx, ny)) * 180 / Math.PI;
   const insideReverseGate = angleFromDownDegrees <= REVERSE_GATE_DEGREES;
 
@@ -99,8 +97,6 @@ function throttleAxisFromStick(cx: number, cy: number): number {
 export function GameScreen({ progress, onEnd }: Props) {
   const worldRef = useRef<World>(createWorld(ARENA_W, ARENA_H, progress));
   const wheelRef = useRef(0);
-  // Single-stick throttle axis. Positive = forward throttle, negative = brake/reverse.
-  // Magnitude (0..1) is proportional to how far the stick is pushed.
   const throttleAxisRef = useRef(0);
   const fireRef = useRef(AUTO_FIRE_FOR_TESTING);
   const abilityTriggerRef = useRef(false);
@@ -210,7 +206,22 @@ export function GameScreen({ progress, onEnd }: Props) {
     fireRef.current = AUTO_FIRE_FOR_TESTING;
   };
 
-  const dbgCar = `car (${w.carX.toFixed(0)}, ${w.carY.toFixed(0)})  hd=${w.heading.toFixed(2)}  v=${w.forwardV.toFixed(0)}`;
+  // Live debug HUD lines. Computed at render time from the current world
+  // state + input refs so the player can SEE the engine math change with
+  // each push (rather than guessing whether physics is doing anything).
+  //   hd  = heading in degrees
+  //   vF  = forward velocity (speed along the nose)
+  //   vL  = lateral velocity (perpendicular -- nonzero = drift/slide)
+  //   omega = instantaneous heading turn rate (rad/s)
+  //   wh  = current wheel input (-1..1 from stick X)
+  //   th  = current throttle axis (-1..1 from stick Y, signed)
+  // If physics is alive: vF spikes when you accelerate, vL spikes during
+  // hard turns and decays in <0.3 s, omega tracks the stick.
+  const _sH = Math.sin(w.heading);
+  const _cH = Math.cos(w.heading);
+  const _vL = w.carVx * _cH + w.carVy * _sH;
+  const dbgEng = `hd=${(w.heading * 180 / Math.PI).toFixed(0)}°  vF=${w.forwardV.toFixed(0)}  vL=${_vL.toFixed(0)}  ω=${w.angularVelocity.toFixed(2)}`;
+  const dbgInp = `wh=${wheelRef.current.toFixed(2)}  th=${throttleAxisRef.current.toFixed(2)}  pos=(${w.carX.toFixed(0)}, ${w.carY.toFixed(0)})`;
   const dbgZ = `z=${w.zombies.length}  pr=${w.projectiles.length}  hp=${w.hp.toFixed(0)}/${w.maxHp.toFixed(0)}`;
 
   return (
@@ -258,7 +269,8 @@ export function GameScreen({ progress, onEnd }: Props) {
         {w.streak > 0 && (
           <Text style={styles.streakText}>STREAK ×{w.streak}</Text>
         )}
-        <Text style={styles.dbg}>{dbgCar}</Text>
+        <Text style={styles.dbg}>{dbgEng}</Text>
+        <Text style={styles.dbg}>{dbgInp}</Text>
         <Text style={styles.dbg}>{dbgZ}</Text>
       </View>
 
@@ -326,10 +338,6 @@ export function GameScreen({ progress, onEnd }: Props) {
   );
 }
 
-// Bumps the global frame counter every render tick and captures the GL
-// drawing buffer dimensions on first frame. Anything inside the Canvas
-// can call useFrame; this one's job is purely to surface render-loop
-// liveness to the diagnostics panel.
 function FrameProbe() {
   const reported = useRef(false);
   useFrame((state) => {
@@ -361,31 +369,39 @@ function GrassGround({ world }: { world: World }) {
   );
 }
 
-// Reference vehicle length the camera was tuned for. Vehicles longer than
-// this pull the camera back proportionally so the whole car stays in frame
-// and the size hierarchy is visible (tank reads as bigger than hatchback,
-// not just same-frame-different-mesh).
 const CAM_REFERENCE_LENGTH = 80;
+
+// Camera follow tuning. The focal point is computed as
+//   target = (carX + carVx * CAM_LOOKAHEAD, carY + carVy * CAM_LOOKAHEAD)
+// and the actual camera lerps toward it at CAM_FOLLOW_K per second.
+//
+// This is what produces the on-screen sense of motion. Without it the
+// car sits dead-center every frame and the only motion cue is the
+// scrolling grass texture -- which makes every engine variant feel
+// identical because you can't see the velocity vector at all.
+const CAM_LOOKAHEAD = 0.18;   // seconds of velocity to look ahead by
+const CAM_FOLLOW_K = 4.0;     // exp-lerp rate, ~0.17 s half-life
 
 function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const zoomState = useRef<number>(1.0);
   const zoomInit = useRef(false);
-  // Per-vehicle baseline: longer vehicles pull camera back, floored at 0.85
-  // so tiny vehicles don't pinch us in.
+  // Smoothed camera focal point with velocity lookahead.
+  const focalX = useRef(0);
+  const focalY = useRef(0);
+  const focalInit = useRef(false);
   const vehicleZoom = Math.max(0.85, vehicle.height / CAM_REFERENCE_LENGTH);
   useFrame((state, dt) => {
     if (!zoomInit.current) {
       zoomState.current = vehicleZoom;
       zoomInit.current = true;
     }
-    // Camera anchors directly to the car position. No velocity lookahead or
-    // focal smoothing -- those couple the camera to gas/brake momentum, which
-    // made stationary zombies appear to slide along with the car during
-    // acceleration and braking.
-    //
-    // Context-aware zoom is kept: scan zombies within consideration radius for
-    // the biggest one. Bosses (size 36) pull the camera back so their full
-    // silhouette reads; walkers (size 14) contribute nothing.
+    if (!focalInit.current) {
+      focalX.current = world.carX;
+      focalY.current = world.carY;
+      focalInit.current = true;
+    }
+
+    // Context-aware zoom (boss + ship-size aware).
     let maxNearbySize = 0;
     const rSq = TUNING.ZOOM_CONSIDERATION_RADIUS * TUNING.ZOOM_CONSIDERATION_RADIUS;
     for (const z of world.zombies) {
@@ -398,22 +414,31 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
       (TUNING.ZOOM_SIZE_AT_MIN - TUNING.ZOOM_SIZE_THRESHOLD)
     ));
     const targetZoom = vehicleZoom * (1 + sizeFrac * TUNING.ZOOM_BOSS_BONUS);
-    // Slow lerp so the zoom doesn't twitch as zombies pop in and out of range.
     const zoomAlpha = 1 - Math.exp(-TUNING.CAMERA_ZOOM_K * dt);
     zoomState.current += (targetZoom - zoomState.current) * zoomAlpha;
     const zoom = zoomState.current;
-    // Shake: small random offset scaled by world.shake (kill / explosion impulse).
+
+    // Velocity-lookahead focal point. The car will visibly sit BEHIND this
+    // point on screen because the camera is positioned directly above the
+    // focal (top-down) and lookAt-s the focal. When the velocity vector
+    // diverges from heading (lateral slip / drift), the focal slides off
+    // to the side of the nose -- giving the player visible drift feedback.
+    const targetFocalX = world.carX + world.carVx * CAM_LOOKAHEAD;
+    const targetFocalY = world.carY + world.carVy * CAM_LOOKAHEAD;
+    const focalAlpha = 1 - Math.exp(-CAM_FOLLOW_K * dt);
+    focalX.current += (targetFocalX - focalX.current) * focalAlpha;
+    focalY.current += (targetFocalY - focalY.current) * focalAlpha;
+
     const sx = (Math.random() - 0.5) * world.shake * 3;
     const sz = (Math.random() - 0.5) * world.shake * 3;
-    // Scale all three offsets (X, Y, Z) by the same zoom factor so the camera
-    // angle stays constant -- you only see more of the world, not a different
-    // perspective.
+
+    // Camera sits directly above the focal point (pure top-down).
     state.camera.position.set(
-      world.carX + CAM_OFFSET_X * zoom + sx,
+      focalX.current + sx,
       CAM_HEIGHT * zoom,
-      world.carY + CAM_OFFSET_Z * zoom + sz,
+      focalY.current + sz,
     );
-    state.camera.lookAt(world.carX, 0, world.carY);
+    state.camera.lookAt(focalX.current, 0, focalY.current);
   });
   return null;
 }
@@ -437,13 +462,6 @@ const CAR_VISUAL_SCALE = 1.2;
 const MAX_BODY_PITCH = 0.12;
 const MAX_BODY_ROLL = 0.14;
 
-// Kenney vehicle GLBs are authored at varying intrinsic sizes (a tank is
-// natively much larger than a hatchback). Applying a uniform scale based
-// on vehicle.width alone produces inconsistent on-screen footprints. We
-// instead auto-fit after load: measure the model's bbox, then scale so
-// its longest horizontal axis lands on the game's `vehicle.height` length
-// (multiplied by CAR_VISUAL_SCALE). Proportions stay correct per GLB,
-// and the rendered footprint matches the gameplay AABB.
 const VEH_GLB_Y = CAR_LIFT;
 
 function fitScaleFor(model: Object3D, vehicle: Vehicle): number {
@@ -507,7 +525,6 @@ function CarMesh({ world, vehicle }: { world: World; vehicle: Vehicle }) {
             <primitive object={model} />
           </group>
         ) : (
-          // Box fallback while GLB is loading.
           <group scale={CAR_VISUAL_SCALE}>
             <mesh position={[0, 0, 0]}>
               <boxGeometry args={[vehicle.width, CAR_DEPTH, vehicle.height]} />
@@ -549,8 +566,6 @@ function projectileBoxStyle(kind: string) {
 }
 
 function SpeedBar({ world, vehicle }: { world: World; vehicle: Vehicle }) {
-  // Bar fill is normalized momentum (0..1 of vehicle's gameplay top speed).
-  // mph readout is realistic per vehicle.
   const fillPct = Math.max(0, Math.min(1, world.momentum)) * 100;
   const tickPct = Math.max(0, Math.min(1, KILL_SPEED / Math.max(1, vehicle.baseSpeed))) * 100;
   const inKillRange = world.momentum * vehicle.baseSpeed >= KILL_SPEED;
@@ -594,7 +609,6 @@ function StreakBanner({ world }: { world: World }) {
         Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
       ]).start(() => {
         setVisibleKind(null);
-        // Clear the trigger so a future identical kind can re-fire.
         world.streakBannerKind = null;
       });
     }
