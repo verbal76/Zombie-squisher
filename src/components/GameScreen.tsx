@@ -1,14 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Animated, Dimensions, GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { Canvas, useFrame } from '@react-three/fiber/native';
 import { Box3, Object3D, Vector3 } from 'three';
 import { Progress, Vehicle, Projectile, BloodSpot } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
-import { World, createWorld, step, KILL_SPEED, StreakBannerKind, TUNING } from '../game/engine';
+import { World, createWorld, step, KILL_SPEED, StreakBannerKind, TUNING, GearState } from '../game/engine';
 import { VEHICLE_GLB } from '../data/objects';
 import { loadVehicleGLB } from '../render/loadVehicle';
-import { Thumbstick, ThumbstickHandle } from './Thumbstick';
 import { AboutModal } from './AboutModal';
 import { ZombieCharacter } from './ZombieCharacter';
 import { getGrassTexture } from '../render/grassTexture';
@@ -24,18 +23,8 @@ const ARENA_H = 1200;
 const CAR_DEPTH = 18;
 const CAR_LIFT = 1;
 
-const WHEEL_SIZE = 170;
-const BTN_SIZE = 78;
-const BTN_GAP = 12;
-const MARGIN = 24;
-
 const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
 
-// Pure top-down camera. CAM_HEIGHT controls zoom; lower = closer.
-// CAM_OFFSET_X/Z are kept at 0 because the camera now lerps toward a
-// VELOCITY-LOOKAHEAD focal point in CameraTracker -- the car is no
-// longer pinned to screen center, it slides off-center in the direction
-// of motion so the player has visible feedback that they ARE moving.
 const CAM_OFFSET_X = 0;
 const CAM_HEIGHT = 900;
 const CAM_OFFSET_Z = 0;
@@ -50,62 +39,58 @@ const CAMERA_CONFIG = {
 
 const HUD_TICK_MS = 100;
 
-// Single-stick controls: stick Y is the throttle/brake/reverse axis, stick X
-// is the turn axis. The right-side cluster now only hosts the FIRE button;
-// the ability button stays in its top-right slot.
-const BTN_FIRE_X = 0;
-const BTN_FIRE_Y = 0;
-const CLUSTER_W = BTN_SIZE;
-const CLUSTER_H = BTN_SIZE;
+// === FRZ-style five-button bottom row ===
+//   [ ← ] [ F ] [ TURBO ] [ R ] [ → ]
+// LEFT / RIGHT arrows are bigger (thumb-friendly), middle three are smaller.
+const ARROW_BTN_SIZE = 92;
+const MID_BTN_SIZE   = 72;
+const BUTTON_ROW_GAP = 12;
+const BUTTON_ROW_BOTTOM = 22;
+const BUTTON_ROW_HITSLOP = 20;
+const CONTROL_OVERLAY_H = ARROW_BTN_SIZE + BUTTON_ROW_BOTTOM * 2;
 
-const STICK_KNOB_SIZE = Math.round(WHEEL_SIZE * 0.42);
-const STICK_MAX_OFFSET = WHEEL_SIZE / 2 - STICK_KNOB_SIZE / 2 - 4;
-const STICK_GRAB_RADIUS = WHEEL_SIZE / 2 + 24;
-const CONTROL_OVERLAY_H = Math.max(WHEEL_SIZE, CLUSTER_H) + MARGIN * 2;
+const BUTTON_ROW_TOTAL_W =
+  2 * ARROW_BTN_SIZE + 3 * MID_BTN_SIZE + 4 * BUTTON_ROW_GAP;
 
-const AUTO_FIRE_FOR_TESTING = true;
+type TouchKind = 'steerLeft' | 'steerRight' | 'gearForward' | 'gearReverse' | 'turbo';
+interface TouchState { kind: TouchKind; }
 
-// Reverse engagement requires a deliberate stick-down within a narrow cone
-// of straight-down, with a minimum magnitude. Sideways/diagonal stick is
-// pure steering and produces zero throttle, so the player can carve turns
-// without accidentally braking.
-const REVERSE_GATE_DEGREES = 30;
-const REVERSE_MIN_PULL = 0.25;
-const STICK_CENTER_DEADZONE = 0.15;
-
-function throttleAxisFromStick(cx: number, cy: number): number {
-  const nx = Math.max(-1, Math.min(1, cx / STICK_MAX_OFFSET));
-  const ny = Math.max(-1, Math.min(1, cy / STICK_MAX_OFFSET));
-  const magnitude = Math.min(1, Math.hypot(nx, ny));
-
-  if (magnitude < STICK_CENTER_DEADZONE) return 0;
-
-  if (ny < 0) {
-    return Math.min(1, -ny);
-  }
-
-  const angleFromDownDegrees = Math.abs(Math.atan2(nx, ny)) * 180 / Math.PI;
-  const insideReverseGate = angleFromDownDegrees <= REVERSE_GATE_DEGREES;
-
-  if (insideReverseGate && magnitude >= REVERSE_MIN_PULL) {
-    return -Math.min(1, ny);
-  }
-
-  return 0;
-}
+const HOLD_KINDS = new Set<TouchKind>(['steerLeft', 'steerRight', 'turbo']);
+const TAP_KINDS  = new Set<TouchKind>(['gearForward', 'gearReverse']);
 
 export function GameScreen({ progress, onEnd }: Props) {
   const worldRef = useRef<World>(createWorld(ARENA_W, ARENA_H, progress));
-  const wheelRef = useRef(0);
-  const throttleAxisRef = useRef(0);
-  const fireRef = useRef(AUTO_FIRE_FOR_TESTING);
+  const steerLeftRef  = useRef(false);
+  const steerRightRef = useRef(false);
+  const gearRef       = useRef<GearState>('forward');
+  const turboRef      = useRef(false);
   const abilityTriggerRef = useRef(false);
+  const [gearVisual, setGearVisual] = useState<GearState>('forward');
+  const [turboVisual, setTurboVisual] = useState(false);
   const [, setTick] = useState(0);
   const [exited, setExited] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
 
   const vehicle = VEHICLES[progress.selectedVehicle];
   const ability = ABILITIES[progress.selectedAbility];
+
+  const screen = Dimensions.get('window');
+  const sw = screen.width;
+  const sh = screen.height;
+
+  // Pre-compute each button's pixel position so the touch dispatcher (classify)
+  // can run a flat hit-test per finger.
+  const rowStartX = (sw - BUTTON_ROW_TOTAL_W) / 2;
+  const rowCenterY = sh - BUTTON_ROW_BOTTOM - ARROW_BTN_SIZE / 2;
+  const btnLayouts: { kind: TouchKind; x: number; y: number; w: number; h: number }[] = [
+    { kind: 'steerLeft',   x: rowStartX,                                                                      y: rowCenterY - ARROW_BTN_SIZE / 2, w: ARROW_BTN_SIZE, h: ARROW_BTN_SIZE },
+    { kind: 'gearForward', x: rowStartX + ARROW_BTN_SIZE + BUTTON_ROW_GAP,                                    y: rowCenterY - MID_BTN_SIZE / 2,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
+    { kind: 'turbo',       x: rowStartX + ARROW_BTN_SIZE + MID_BTN_SIZE + 2 * BUTTON_ROW_GAP,                 y: rowCenterY - MID_BTN_SIZE / 2,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
+    { kind: 'gearReverse', x: rowStartX + ARROW_BTN_SIZE + 2 * MID_BTN_SIZE + 3 * BUTTON_ROW_GAP,             y: rowCenterY - MID_BTN_SIZE / 2,   w: MID_BTN_SIZE,   h: MID_BTN_SIZE   },
+    { kind: 'steerRight',  x: rowStartX + ARROW_BTN_SIZE + 3 * MID_BTN_SIZE + 4 * BUTTON_ROW_GAP,             y: rowCenterY - ARROW_BTN_SIZE / 2, w: ARROW_BTN_SIZE, h: ARROW_BTN_SIZE },
+  ];
+
+  const touchesRef = useRef<Map<number | string, TouchState>>(new Map());
 
   useEffect(() => {
     Diag.resetFrames();
@@ -118,9 +103,11 @@ export function GameScreen({ progress, onEnd }: Props) {
       last = now;
       const w = worldRef.current;
       step(w, dt, {
-        wheel: wheelRef.current,
-        throttleAxis: throttleAxisRef.current,
-        fire: AUTO_FIRE_FOR_TESTING || fireRef.current,
+        steerLeft:  steerLeftRef.current,
+        steerRight: steerRightRef.current,
+        gear:       gearRef.current,
+        turbo:      turboRef.current,
+        fire:       true,  // Auto-fire (Vampire-Survivors-style); no FIRE button on screen.
         triggerAbility: abilityTriggerRef.current,
       }, progress);
       abilityTriggerRef.current = false;
@@ -143,85 +130,82 @@ export function GameScreen({ progress, onEnd }: Props) {
   const hpPct = Math.max(0, w.hp / Math.max(1, w.maxHp));
   const cdPct = ability.cooldownMs > 0 ? 1 - w.abilityCooldown / ability.cooldownMs : 1;
 
-  const stickRef = useRef<ThumbstickHandle>(null);
-  const overlayLayoutRef = useRef({ width: 0, height: CONTROL_OVERLAY_H });
-
-  const updateFromTouches = (e: GestureResponderEvent) => {
-    const touches = e.nativeEvent.touches;
-    const overlayW = overlayLayoutRef.current.width;
-    const overlayH = overlayLayoutRef.current.height;
-
-    const stickCx = MARGIN + WHEEL_SIZE / 2;
-    const stickCy = overlayH - MARGIN - WHEEL_SIZE / 2;
-    const clusterX0 = overlayW - MARGIN - CLUSTER_W;
-    const clusterY0 = overlayH - MARGIN - CLUSTER_H;
-
-    let fire = false;
-    let stickFound = false;
-
-    for (let i = 0; i < touches.length; i++) {
-      const t = touches[i];
-      const x = t.locationX;
-      const y = t.locationY;
-
-      if (!stickFound) {
-        const dx = x - stickCx;
-        const dy = y - stickCy;
-        if (Math.hypot(dx, dy) <= STICK_GRAB_RADIUS) {
-          let cx = dx;
-          let cy = dy;
-          const dist = Math.hypot(cx, cy);
-          if (dist > STICK_MAX_OFFSET && dist > 0) {
-            cx = (cx / dist) * STICK_MAX_OFFSET;
-            cy = (cy / dist) * STICK_MAX_OFFSET;
-          }
-          stickRef.current?.setKnob(cx, cy);
-          wheelRef.current = Math.max(-1, Math.min(1, cx / STICK_MAX_OFFSET));
-          throttleAxisRef.current = throttleAxisFromStick(cx, cy);
-          stickFound = true;
-          continue;
-        }
+  function classify(x: number, y: number): TouchKind | null {
+    for (const b of btnLayouts) {
+      if (
+        x >= b.x - BUTTON_ROW_HITSLOP && x <= b.x + b.w + BUTTON_ROW_HITSLOP &&
+        y >= b.y - BUTTON_ROW_HITSLOP && y <= b.y + b.h + BUTTON_ROW_HITSLOP
+      ) {
+        return b.kind;
       }
+    }
+    return null;
+  }
 
-      const bx = x - clusterX0;
-      const by = y - clusterY0;
-      if (bx >= 0 && bx <= CLUSTER_W && by >= 0 && by <= CLUSTER_H) {
-        if (bx >= BTN_FIRE_X && bx <= BTN_FIRE_X + BTN_SIZE && by >= BTN_FIRE_Y && by <= BTN_FIRE_Y + BTN_SIZE) fire = true;
+  function setHoldState(kind: TouchKind, on: boolean) {
+    if (kind === 'steerLeft')  steerLeftRef.current  = on;
+    if (kind === 'steerRight') steerRightRef.current = on;
+    if (kind === 'turbo') {
+      turboRef.current = on;
+      setTurboVisual(on);
+    }
+  }
+
+  function triggerTap(kind: TouchKind) {
+    if (kind === 'gearForward') {
+      gearRef.current = 'forward';
+      setGearVisual('forward');
+    } else if (kind === 'gearReverse') {
+      gearRef.current = 'reverse';
+      setGearVisual('reverse');
+    }
+  }
+
+  function shouldSetResponder(e: GestureResponderEvent) {
+    return classify(e.nativeEvent.pageX, e.nativeEvent.pageY) !== null;
+  }
+
+  function processTouches(e: GestureResponderEvent) {
+    const active = e.nativeEvent.touches || [];
+    const activeIds = new Set(active.map((t) => t.identifier));
+
+    for (const t of active) {
+      const id = t.identifier;
+      const tx = (t as any).pageX ?? t.pageX;
+      const ty = (t as any).pageY ?? t.pageY;
+      if (!touchesRef.current.has(id)) {
+        const kind = classify(tx, ty);
+        if (!kind) continue;
+        touchesRef.current.set(id, { kind });
+        if (HOLD_KINDS.has(kind)) setHoldState(kind, true);
+        else if (TAP_KINDS.has(kind)) triggerTap(kind);
       }
     }
 
-    if (!stickFound) {
-      stickRef.current?.springHome();
-      wheelRef.current = 0;
-      throttleAxisRef.current = 0;
+    const ended = (e.nativeEvent.changedTouches || []).filter(
+      (t) => !activeIds.has(t.identifier),
+    );
+    for (const t of ended) {
+      const state = touchesRef.current.get(t.identifier);
+      if (!state) continue;
+      touchesRef.current.delete(t.identifier);
+      if (HOLD_KINDS.has(state.kind)) setHoldState(state.kind, false);
     }
+  }
 
-    fireRef.current = AUTO_FIRE_FOR_TESTING || fire;
-  };
+  function onResponderRelease() {
+    for (const state of Array.from(touchesRef.current.values())) {
+      if (HOLD_KINDS.has(state.kind)) setHoldState(state.kind, false);
+    }
+    touchesRef.current.clear();
+  }
 
-  const releaseAllControls = () => {
-    stickRef.current?.springHome();
-    wheelRef.current = 0;
-    throttleAxisRef.current = 0;
-    fireRef.current = AUTO_FIRE_FOR_TESTING;
-  };
-
-  // Live debug HUD lines. Computed at render time from the current world
-  // state + input refs so the player can SEE the engine math change with
-  // each push (rather than guessing whether physics is doing anything).
-  //   hd  = heading in degrees
-  //   vF  = forward velocity (speed along the nose)
-  //   vL  = lateral velocity (perpendicular -- nonzero = drift/slide)
-  //   omega = instantaneous heading turn rate (rad/s)
-  //   wh  = current wheel input (-1..1 from stick X)
-  //   th  = current throttle axis (-1..1 from stick Y, signed)
-  // If physics is alive: vF spikes when you accelerate, vL spikes during
-  // hard turns and decays in <0.3 s, omega tracks the stick.
+  // === Live physics debug HUD lines ===
   const _sH = Math.sin(w.heading);
   const _cH = Math.cos(w.heading);
   const _vL = w.carVx * _cH + w.carVy * _sH;
   const dbgEng = `hd=${(w.heading * 180 / Math.PI).toFixed(0)}°  vF=${w.forwardV.toFixed(0)}  vL=${_vL.toFixed(0)}  ω=${w.angularVelocity.toFixed(2)}`;
-  const dbgInp = `wh=${wheelRef.current.toFixed(2)}  th=${throttleAxisRef.current.toFixed(2)}  pos=(${w.carX.toFixed(0)}, ${w.carY.toFixed(0)})`;
+  const dbgInp = `L=${steerLeftRef.current ? 1 : 0}  R=${steerRightRef.current ? 1 : 0}  gear=${gearVisual}  turbo=${turboVisual ? 1 : 0}`;
   const dbgZ = `z=${w.zombies.length}  pr=${w.projectiles.length}  hp=${w.hp.toFixed(0)}/${w.maxHp.toFixed(0)}`;
 
   return (
@@ -280,45 +264,61 @@ export function GameScreen({ progress, onEnd }: Props) {
         <Text style={styles.gearIcon}>⚙</Text>
       </Pressable>
 
+      {/* Five-button control row. Container is full-bottom for the responder;
+          individual button visuals are absolute-positioned per btnLayouts. */}
       <View
         style={{
           position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
+          left: 0, right: 0, bottom: 0,
           height: CONTROL_OVERLAY_H,
         }}
-        onLayout={(e) => {
-          overlayLayoutRef.current = {
-            width: e.nativeEvent.layout.width,
-            height: e.nativeEvent.layout.height,
-          };
-        }}
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
-        onResponderGrant={updateFromTouches}
-        onResponderMove={updateFromTouches}
-        onResponderRelease={releaseAllControls}
-        onResponderTerminate={releaseAllControls}
+        onStartShouldSetResponder={shouldSetResponder}
+        onMoveShouldSetResponder={shouldSetResponder}
+        onResponderGrant={processTouches}
+        onResponderMove={processTouches}
+        onResponderRelease={onResponderRelease}
+        onResponderTerminate={onResponderRelease}
       >
-        <View style={{ position: 'absolute', left: MARGIN, bottom: MARGIN }}>
-          <Thumbstick ref={stickRef} size={WHEEL_SIZE} />
-        </View>
+        {btnLayouts.map((b) => {
+          const pressed =
+            (b.kind === 'steerLeft'   && steerLeftRef.current)  ||
+            (b.kind === 'steerRight'  && steerRightRef.current) ||
+            (b.kind === 'turbo'       && turboVisual);
+          const activeGear =
+            (b.kind === 'gearForward' && gearVisual === 'forward') ||
+            (b.kind === 'gearReverse' && gearVisual === 'reverse');
 
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            right: MARGIN,
-            bottom: MARGIN,
-            width: CLUSTER_W,
-            height: CLUSTER_H,
-          }}
-        >
-          <View style={[styles.btn, styles.btnFire, { left: BTN_FIRE_X, top: BTN_FIRE_Y, width: BTN_SIZE, height: BTN_SIZE }]}>
-            <Text style={styles.btnText}>{AUTO_FIRE_FOR_TESTING ? 'AUTO' : 'FIRE'}</Text>
-          </View>
-        </View>
+          let label = '';
+          let extraStyle: any = null;
+          if (b.kind === 'steerLeft')   { label = '◀'; extraStyle = pressed ? styles.btnPressed : null; }
+          else if (b.kind === 'steerRight') { label = '▶'; extraStyle = pressed ? styles.btnPressed : null; }
+          else if (b.kind === 'gearForward') { label = 'F';  extraStyle = activeGear ? styles.btnGearForward : null; }
+          else if (b.kind === 'gearReverse') { label = 'R';  extraStyle = activeGear ? styles.btnGearReverse : null; }
+          else if (b.kind === 'turbo')       { label = '⚡'; extraStyle = pressed ? styles.btnTurbo : null; }
+
+          const isArrow = b.kind === 'steerLeft' || b.kind === 'steerRight';
+          const textStyle = isArrow ? styles.arrowText : styles.midBtnText;
+
+          return (
+            <View
+              key={b.kind}
+              pointerEvents="none"
+              style={[
+                styles.ctlBtn,
+                {
+                  left: b.x,
+                  top: b.y - (sh - CONTROL_OVERLAY_H), // re-anchor into local coord of the overlay container
+                  width: b.w,
+                  height: b.h,
+                  borderRadius: b.w / 2,
+                },
+                extraStyle,
+              ]}
+            >
+              <Text style={textStyle}>{label}</Text>
+            </View>
+          );
+        })}
       </View>
 
       {progress.selectedAbility !== 'none' && (
@@ -370,22 +370,12 @@ function GrassGround({ world }: { world: World }) {
 }
 
 const CAM_REFERENCE_LENGTH = 80;
-
-// Camera follow tuning. The focal point is computed as
-//   target = (carX + carVx * CAM_LOOKAHEAD, carY + carVy * CAM_LOOKAHEAD)
-// and the actual camera lerps toward it at CAM_FOLLOW_K per second.
-//
-// This is what produces the on-screen sense of motion. Without it the
-// car sits dead-center every frame and the only motion cue is the
-// scrolling grass texture -- which makes every engine variant feel
-// identical because you can't see the velocity vector at all.
-const CAM_LOOKAHEAD = 0.18;   // seconds of velocity to look ahead by
-const CAM_FOLLOW_K = 4.0;     // exp-lerp rate, ~0.17 s half-life
+const CAM_LOOKAHEAD = 0.18;
+const CAM_FOLLOW_K = 4.0;
 
 function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
   const zoomState = useRef<number>(1.0);
   const zoomInit = useRef(false);
-  // Smoothed camera focal point with velocity lookahead.
   const focalX = useRef(0);
   const focalY = useRef(0);
   const focalInit = useRef(false);
@@ -401,7 +391,6 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
       focalInit.current = true;
     }
 
-    // Context-aware zoom (boss + ship-size aware).
     let maxNearbySize = 0;
     const rSq = TUNING.ZOOM_CONSIDERATION_RADIUS * TUNING.ZOOM_CONSIDERATION_RADIUS;
     for (const z of world.zombies) {
@@ -418,11 +407,6 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     zoomState.current += (targetZoom - zoomState.current) * zoomAlpha;
     const zoom = zoomState.current;
 
-    // Velocity-lookahead focal point. The car will visibly sit BEHIND this
-    // point on screen because the camera is positioned directly above the
-    // focal (top-down) and lookAt-s the focal. When the velocity vector
-    // diverges from heading (lateral slip / drift), the focal slides off
-    // to the side of the nose -- giving the player visible drift feedback.
     const targetFocalX = world.carX + world.carVx * CAM_LOOKAHEAD;
     const targetFocalY = world.carY + world.carVy * CAM_LOOKAHEAD;
     const focalAlpha = 1 - Math.exp(-CAM_FOLLOW_K * dt);
@@ -432,7 +416,6 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     const sx = (Math.random() - 0.5) * world.shake * 3;
     const sz = (Math.random() - 0.5) * world.shake * 3;
 
-    // Camera sits directly above the focal point (pure top-down).
     state.camera.position.set(
       focalX.current + sx,
       CAM_HEIGHT * zoom,
@@ -461,7 +444,6 @@ function BloodMesh({ blood }: { blood: BloodSpot }) {
 const CAR_VISUAL_SCALE = 1.2;
 const MAX_BODY_PITCH = 0.12;
 const MAX_BODY_ROLL = 0.14;
-
 const VEH_GLB_Y = CAR_LIFT;
 
 function fitScaleFor(model: Object3D, vehicle: Vehicle): number {
@@ -633,9 +615,34 @@ const styles = StyleSheet.create({
   dbg: { color: '#9ff', fontFamily: 'Courier', fontSize: 11, marginTop: 4 },
   gear: { position: 'absolute', right: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(26,26,26,0.85)', borderWidth: 2, borderColor: '#2a2a2a', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   gearIcon: { color: '#ffd24a', fontSize: 22, lineHeight: 26 },
-  btn: { position: 'absolute', borderRadius: 16, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  btnFire: { backgroundColor: 'rgba(255,180,40,0.9)', borderColor: '#3a2a00' },
-  btnText: { color: '#000', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
+
+  ctlBtn: {
+    position: 'absolute',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderColor: 'rgba(255,255,255,0.30)',
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnPressed: {
+    backgroundColor: 'rgba(34,211,238,0.30)',
+    borderColor: 'rgba(34,211,238,0.90)',
+  },
+  btnGearForward: {
+    backgroundColor: 'rgba(34,211,238,0.25)',
+    borderColor: '#22d3ee',
+  },
+  btnGearReverse: {
+    backgroundColor: 'rgba(249,115,22,0.25)',
+    borderColor: '#f97316',
+  },
+  btnTurbo: {
+    backgroundColor: 'rgba(255,210,74,0.30)',
+    borderColor: '#ffd24a',
+  },
+  arrowText: { color: '#fff', fontSize: 36, fontWeight: '900' },
+  midBtnText:  { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 1 },
+
   abilityBtn: { position: 'absolute', right: 16, top: 80, backgroundColor: '#222', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 2, borderColor: '#ffd24a', minWidth: 110, alignItems: 'center' },
   abilityBtnDisabled: { opacity: 0.5, borderColor: '#555' },
   abilityText: { color: '#ffd24a', fontWeight: '800', fontSize: 13 },

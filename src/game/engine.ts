@@ -4,6 +4,8 @@ import { WEAPONS, ABILITIES } from '../data/weapons';
 import { SIDE_MODS } from '../data/sideMods';
 import { ZOMBIE_DEFS, pickZombieKind } from '../data/zombies';
 
+export type GearState = 'forward' | 'reverse' | 'neutral';
+
 export interface World {
   width: number;
   height: number;
@@ -11,16 +13,18 @@ export interface World {
   carY: number;
   /** Heading in radians. 0 = facing toward -Y, up the screen. */
   heading: number;
-  /** Forward speed scalar in heading direction. Negative = reversing. Derived each tick from the persistent 2D velocity. */
+  /** Forward speed scalar in heading direction. Negative = reversing. */
   forwardV: number;
-  /** Vestigial: kept on World for save/runtime compat. New physics has no 3-phase brake. */
+  /** Vestigial: kept for runtime/save shape compat. */
   brakeHoldTimer: number;
   carVx: number;
   carVy: number;
-  /** Smoothed wheel input -1..1 for body roll. Does NOT feed the steering force. */
+  /** Smoothed steer input -1..1 for body roll. Does NOT feed the steering force. */
   steeringAngle: number;
   /** Instantaneous heading turn rate (rad/s) for the current tick. */
   angularVelocity: number;
+  /** Last gear input processed -- used to detect transmission-jam direction flips. */
+  lastGear: GearState;
   scroll: number;
   speed: number;
   zombies: Zombie[];
@@ -105,6 +109,7 @@ export function createWorld(width: number, height: number, p: Progress): World {
     carVy: 0,
     steeringAngle: 0,
     angularVelocity: 0,
+    lastGear: 'forward',
     scroll: 0,
     speed: 0,
     zombies: [],
@@ -133,10 +138,15 @@ export function createWorld(width: number, height: number, p: Progress): World {
 }
 
 export interface UpdateInput {
-  /** -1..1 turn input from stick X. Negative = left. */
-  wheel: number;
-  /** -1..1 throttle axis. Positive = forward. Negative = brake/reverse (target speed flips sign). */
-  throttleAxis: number;
+  /** True while the LEFT arrow button is held. */
+  steerLeft: boolean;
+  /** True while the RIGHT arrow button is held. */
+  steerRight: boolean;
+  /** Current gear, set by tapping F / R buttons. */
+  gear: GearState;
+  /** True while the TURBO button is held. */
+  turbo: boolean;
+  /** Auto-fire is always on (Vampire-Survivors-style) -- kept on the input for the engine to read. */
   fire: boolean;
   triggerAbility: boolean;
 }
@@ -186,44 +196,52 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const nitroMul = isNitro ? 1.8 : 1;
   const isShielded = world.invuln > 0 && p.selectedAbility === 'shield' && world.abilityActive > 0;
 
-  const maxSpeed = stats.speed * nitroMul;
-  const maxReverseSpeed = stats.speed * 0.3;
+  // === FRZ-style five-button physics ===
+  //
+  // Inputs (boolean flags):
+  //   steerLeft / steerRight -- held to turn at a constant rate while down.
+  //   gear = forward / reverse / neutral -- toggle set by tapping F / R.
+  //   turbo -- held to multiply targetSpeed by TURBO_MULTIPLIER.
+  //
+  // Throttle:
+  //   targetSpeed = (gear==forward ? +maxSpeed : gear==reverse ? -maxReverseSpeed : 0)
+  //   vFwd exp-lerps to targetSpeed at FORWARD_K when accelerating, BRAKE_K
+  //   when the target opposes current motion (transmission jam = harder decel).
+  //
+  // Transmission jam:
+  //   When the player slams F<->R while moving fast, the engine detects the
+  //   gear flip, injects a small lateral kick into vLat (visible skid), and
+  //   the BRAKE_K decel takes over to stop the car before reversing into the
+  //   new direction.
+  //
+  // Steering:
+  //   rawSteer = (steerLeft ? -1 : 0) + (steerRight ? +1 : 0).
+  //   Heading rotates at maxTurnNow * rawSteer rad/s, where maxTurnNow has
+  //   the same speed-dependent authority shape as before (floor 0.25, ramps
+  //   to 1.0 above |v|=70, capped by highSpeedLimit at top speed).
+  //
+  // Position integrates from the persistent 2D velocity, with vLat decaying
+  // turn-dependent (faster going straight, slower during a held turn).
 
-  // === Ocean Spore-style physics ===
-  // Velocity is the persistent 2D state in world.carVx/Vy. Each tick:
-  //   1) Body-roll mirror: smoothed wheel input feeds world.steeringAngle
-  //      for CarMesh's body-roll animation only.
-  //   2) Steering applies an instant turn rate to world.heading (no wheel
-  //      inertia on the force itself -- Ocean Spore uses raw input.dx).
-  //   3) The persistent velocity is re-decomposed against the NEW heading
-  //      into vFwd (along nose) and vLat (perpendicular). Heading rotation
-  //      creates lateral carry-over which becomes drift.
-  //   4) Throttle exp-lerps vFwd toward (throttleAxis * maxSpeed). Reverse
-  //      "emerges" from a negative target -- no 3-phase brake/hold logic.
-  //   5) Lateral grip exp-lerps vLat toward 0, fast when going straight
-  //      (LAT_GRIP_STRAIGHT) and slow in a hard turn (LAT_GRIP_TURN) so the
-  //      rear slides through corners.
-  //   6) Recompose vFwd + vLat back into world.carVx/Vy.
-  //   7) Position integrates from carVx/Vy.
+  const TURBO_MULTIPLIER = 1.5;
+  const FORWARD_K = 2.5;          // accel/decel toward target when same direction
+  const BRAKE_K   = 8.0;          // decel rate when input opposes motion (transmission jam)
+  const LAT_GRIP_STRAIGHT = 6.0;
+  const LAT_GRIP_TURN     = 2.5;
+  const COAST_DAMP        = 0.5;
+  const SKID_INJECTION    = 35;
 
-  const FORWARD_K = 2.5;          // exp-lerp rate toward target speed
-  const LAT_GRIP_STRAIGHT = 6.0;  // lateral decay rate going straight (rubber on pavement)
-  const LAT_GRIP_TURN = 2.5;      // lateral decay rate in a hard turn (drift)
-  const COAST_DAMP = 0.5;         // forward damping per second when stick is centered
-  const STICK_DEADZONE = 0.10;    // throttleAxis below this is treated as centered
+  const turboMul = input.turbo ? TURBO_MULTIPLIER : 1;
+  const maxSpeed = stats.speed * nitroMul * turboMul;
+  const maxReverseSpeed = stats.speed * 0.4 * turboMul;
 
-  // --- Wheel input shaping (kept for body-roll feel) ---
-  const rawWheelInput = Math.max(-1, Math.min(1, input.wheel));
-  const shapedWheel = Math.sign(rawWheelInput) * Math.pow(Math.abs(rawWheelInput), 1.25);
-  const rawWheel = Math.abs(shapedWheel) < 0.05 ? 0 : shapedWheel;
+  // --- Steering force (instant, no wheel inertia) ---
+  const rawSteer = (input.steerLeft ? -1 : 0) + (input.steerRight ? 1 : 0);
 
-  // Body-roll mirror: lagged smoothing for CarMesh's roll animation only.
-  // Does NOT feed back into the steering force -- that uses rawWheel directly
-  // for instant response (Ocean Spore convention).
-  const wheelLerp = 1 - Math.pow(0.04, dt);
-  world.steeringAngle += (rawWheel - world.steeringAngle) * wheelLerp;
+  // Body-roll mirror for the visual animation in CarMesh.
+  const steerLerp = 1 - Math.pow(0.04, dt);
+  world.steeringAngle += (rawSteer - world.steeringAngle) * steerLerp;
 
-  // --- Speed-dependent turn authority (using total world speed, not just vFwd) ---
   const speedMag = Math.hypot(world.carVx, world.carVy);
   const speedRatio = Math.min(1, speedMag / Math.max(1, stats.speed));
   const speedTurnFactor = Math.min(1, speedMag / 70);
@@ -232,76 +250,66 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const handlingFactor = Math.max(0.75, Math.min(1.35, stats.handling / 280));
   const highSpeedLimit = 1 - 0.45 * speedRatio;
   const baseTurn = 2.75 * handlingFactor * highSpeedLimit;
-
-  // Arcade convention: stick-right turns car-right even in reverse. Check
-  // forward sign against OLD heading to decide the flip.
-  const sinHOld = Math.sin(world.heading);
-  const cosHOld = Math.cos(world.heading);
-  const vFwdOld = world.carVx * sinHOld + world.carVy * (-cosHOld);
-  const reverseSteerSign = vFwdOld < -0.5 ? -1 : 1;
-
   const maxTurnNow = baseTurn * turnAuthority;
-  const omegaForFrame = rawWheel * maxTurnNow * reverseSteerSign;
-  const turnApplied = omegaForFrame * dt;
-  world.heading += turnApplied;
+  const omegaForFrame = rawSteer * maxTurnNow;
+
+  world.heading += omegaForFrame * dt;
   world.angularVelocity = omegaForFrame;
 
-  // --- Re-decompose persistent velocity against NEW heading ---
-  // World.carVx/Vy haven't been touched yet, so this captures the lateral
-  // carry-over produced by the heading rotation.
+  // --- Decompose persistent velocity against the NEW heading ---
   const sinH = Math.sin(world.heading);
   const cosH = Math.cos(world.heading);
   const fX = sinH;
   const fY = -cosH;
   const rX = cosH;
   const rY = sinH;
-
   let vFwd = world.carVx * fX + world.carVy * fY;
   let vLat = world.carVx * rX + world.carVy * rY;
 
-  // --- Throttle: signed exp-lerp toward target speed ---
-  // Positive throttleAxis -> target = +axis * maxSpeed (forward).
-  // Negative throttleAxis -> target = -|axis| * maxReverseSpeed (brake/reverse).
-  // The exp-lerp does both acceleration and deceleration smoothly; reverse
-  // emerges from sign flip without 3-phase logic.
-  const axisRaw = Math.max(-1, Math.min(1, input.throttleAxis));
-  const axisAbs = Math.abs(axisRaw);
-  const axisAdj = axisAbs < STICK_DEADZONE
-    ? 0
-    : (axisAbs - STICK_DEADZONE) / (1 - STICK_DEADZONE);
-  const axisSigned = axisRaw >= 0 ? axisAdj : -axisAdj;
+  // --- Transmission jam: detect gear flip across direction-of-motion ---
+  if (input.gear !== world.lastGear) {
+    const movingFast = Math.abs(vFwd) > 50;
+    const flipped =
+      (input.gear === 'forward' && vFwd < -5) ||
+      (input.gear === 'reverse' && vFwd > 5);
+    if (movingFast && flipped) {
+      // Inject a lateral kick for visible skid. Favor whichever way the
+      // player is currently steering, otherwise random sign.
+      const skidDir = rawSteer !== 0 ? rawSteer : (Math.random() < 0.5 ? -1 : 1);
+      vLat += skidDir * SKID_INJECTION;
+      world.shake = Math.max(world.shake, 3);
+    }
+    world.lastGear = input.gear;
+  }
 
-  if (Math.abs(axisSigned) > 0) {
-    const targetSpeed = axisSigned >= 0
-      ? axisSigned * maxSpeed
-      : axisSigned * maxReverseSpeed;
-    vFwd = vFwd + (targetSpeed - vFwd) * (1 - Math.exp(-FORWARD_K * dt));
-    world.brakeHoldTimer = 0;
-  } else {
-    // Coast: forward decays multiplicatively. Lateral handled below.
+  // --- Throttle: exp-lerp toward gear target ---
+  let targetSpeed = 0;
+  if (input.gear === 'forward') targetSpeed = maxSpeed;
+  else if (input.gear === 'reverse') targetSpeed = -maxReverseSpeed;
+
+  if (input.gear === 'neutral') {
     vFwd *= Math.max(0, 1 - COAST_DAMP * dt);
     if (Math.abs(vFwd) < 0.5) vFwd = 0;
-    world.brakeHoldTimer = 0;
+  } else {
+    const opposing = Math.sign(targetSpeed) !== Math.sign(vFwd) && Math.abs(vFwd) > 1;
+    const lerpK = opposing ? BRAKE_K : FORWARD_K;
+    vFwd = vFwd + (targetSpeed - vFwd) * (1 - Math.exp(-lerpK * dt));
   }
 
   // --- Lateral grip: turn-dependent decay ---
-  // Going straight (|wheel| -> 0): latK = LAT_GRIP_STRAIGHT, fast lateral kill.
-  // Hard turn (|wheel| -> 1): latK = LAT_GRIP_TURN, slow decay -> drift.
-  const turningFactor = Math.min(1, Math.abs(rawWheel));
+  const turningFactor = Math.min(1, Math.abs(rawSteer));
   const latK = LAT_GRIP_STRAIGHT - (LAT_GRIP_STRAIGHT - LAT_GRIP_TURN) * turningFactor;
   vLat = vLat + (0 - vLat) * (1 - Math.exp(-latK * dt));
 
-  // --- Recompose persistent velocity and integrate position ---
+  // --- Recompose persistent velocity, integrate position ---
   world.carVx = fX * vFwd + rX * vLat;
   world.carVy = fY * vFwd + rY * vLat;
   world.carX += world.carVx * dt;
   world.carY += world.carVy * dt;
 
-  // Expose scalars for HUD / animation / collision code downstream.
   world.forwardV = vFwd;
   world.speed = world.forwardV;
 
-  // Smoothed normalized momentum for HUD bar.
   const speedNow = Math.hypot(world.carVx, world.carVy);
   const targetMomentum = Math.min(1, speedNow / Math.max(1, stats.speed));
   const momentumLerp = 1 - Math.pow(0.1, dt);
@@ -417,8 +425,6 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
           world.invuln = 120;
         }
       } else {
-        // Damp the PERSISTENT 2D velocity. Both vFwd and vLat decay
-        // together; next tick's decompose picks up the slowdown correctly.
         world.carVx *= Math.pow(0.4, dt);
         world.carVy *= Math.pow(0.4, dt);
         world.forwardV *= Math.pow(0.4, dt);
