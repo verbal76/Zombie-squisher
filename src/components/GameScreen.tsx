@@ -345,45 +345,29 @@ function GrassGround({ world }: { world: World }) {
 const CAM_REFERENCE_LENGTH = 80;
 
 function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
-  const focal = useRef<{ x: number; y: number; vx: number; vy: number; init: boolean }>({ x: 0, y: 0, vx: 0, vy: 0, init: false });
   const zoomState = useRef<number>(1.0);
+  const zoomInit = useRef(false);
   // Per-vehicle baseline: longer vehicles pull camera back, floored at 0.85
   // so tiny vehicles don't pinch us in.
   const vehicleZoom = Math.max(0.85, vehicle.height / CAM_REFERENCE_LENGTH);
   useFrame((state, dt) => {
-    const f = focal.current;
-    if (!f.init) {
-      f.x = world.carX;
-      f.y = world.carY;
-      f.vx = world.carVx;
-      f.vy = world.carVy;
-      f.init = true;
+    if (!zoomInit.current) {
       zoomState.current = vehicleZoom;
+      zoomInit.current = true;
     }
-    // Smoothed camera velocity: the lookahead reads from this lagged value, not
-    // the instantaneous car velocity. Without smoothing, sudden braking pops
-    // the focal point and the world appears to lurch forward (which made it
-    // feel like the gas pedal controlled zombie speed).
-    const vLerp = 1 - Math.pow(0.2, dt);
-    f.vx += (world.carVx - f.vx) * vLerp;
-    f.vy += (world.carVy - f.vy) * vLerp;
-    // Mild lookahead so player sees a bit more space in the direction of travel.
-    const lookAhead = 0.06;
-    const targetX = world.carX + f.vx * lookAhead;
-    const targetY = world.carY + f.vy * lookAhead;
-    // Tight focal follow keeps the car centered.
-    const lerp = 1 - Math.pow(0.02, dt);
-    f.x += (targetX - f.x) * lerp;
-    f.y += (targetY - f.y) * lerp;
-    // Context-aware zoom: scan zombies within consideration radius for the
-    // biggest one. Bosses (size 36) pull the camera back so their full silhouette
-    // reads; walkers (size 14) contribute nothing. Bonus is piecewise linear
-    // between ZOOM_SIZE_THRESHOLD and ZOOM_SIZE_AT_MIN.
+    // Camera anchors directly to the car position. No velocity lookahead or
+    // focal smoothing -- those couple the camera to gas/brake momentum, which
+    // made stationary zombies appear to slide along with the car during
+    // acceleration and braking.
+    //
+    // Context-aware zoom is kept: scan zombies within consideration radius for
+    // the biggest one. Bosses (size 36) pull the camera back so their full
+    // silhouette reads; walkers (size 14) contribute nothing.
     let maxNearbySize = 0;
     const rSq = TUNING.ZOOM_CONSIDERATION_RADIUS * TUNING.ZOOM_CONSIDERATION_RADIUS;
     for (const z of world.zombies) {
-      const ddx = z.x - f.x;
-      const ddy = z.y - f.y;
+      const ddx = z.x - world.carX;
+      const ddy = z.y - world.carY;
       if (ddx * ddx + ddy * ddy < rSq && z.size > maxNearbySize) maxNearbySize = z.size;
     }
     const sizeFrac = Math.max(0, Math.min(1,
@@ -402,11 +386,11 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     // angle stays constant -- you only see more of the world, not a different
     // perspective.
     state.camera.position.set(
-      f.x + CAM_OFFSET_X * zoom + sx,
+      world.carX + CAM_OFFSET_X * zoom + sx,
       CAM_HEIGHT * zoom,
-      f.y + CAM_OFFSET_Z * zoom + sz,
+      world.carY + CAM_OFFSET_Z * zoom + sz,
     );
-    state.camera.lookAt(f.x, 0, f.y);
+    state.camera.lookAt(world.carX, 0, world.carY);
   });
   return null;
 }

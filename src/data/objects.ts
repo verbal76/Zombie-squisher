@@ -102,6 +102,7 @@ export type KartKey = keyof typeof KART_GLB;
 // ---------------------------------------------------------------------------
 export const EXTRA_VEHICLE_GLB = {
   dragRacer:     require('../../assets/vehicle-drag-racer.glb'),
+  monsterTruck:  require('../../assets/vehicle-monster-truck.glb'),
   racerLow:      require('../../assets/vehicle-racer-low.glb'),
   racer:         require('../../assets/vehicle-racer.glb'),
   speedster:     require('../../assets/vehicle-speedster.glb'),
