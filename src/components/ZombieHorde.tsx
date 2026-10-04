@@ -1,14 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber/native';
 import { BoxGeometry, InstancedMesh, Matrix4, Object3D } from 'three';
 import { World, MAX_ACTIVE_ZOMBIES } from '../game/engine';
 import { CHARACTER_IDS, zombieVariantIndex } from '../assets/characters';
 import { ZOMBIE_DEFS } from '../data/zombies';
-import { loadCharacter } from '../render/loadCharacter';
+import { buildZombieModels } from '../render/zombieModels';
 import { Diag } from '../debug/diagnostics';
-import {
-  MergedCharacter, ZOMBIE_TINT, composeZombieMatrix, headingFromVelocity, mergeCharacterGeometry,
-} from '../render/hordeGeometry';
+import { ZOMBIE_TINT, composeZombieMatrix, headingFromVelocity } from '../render/hordeGeometry';
 
 const BASE_SCALE = 10;
 const BOSS_SCALE = BASE_SCALE * 1.75;
@@ -28,22 +26,19 @@ const dummy = new Object3D();
  * reconciles hundreds of elements.
  */
 export function ZombieHorde({ world }: { world: World }) {
-  const [variants, setVariants] = useState<MergedCharacter[] | null>(null);
+  // Built once, synchronously, from the committed bake (no async loading state, no model-load hitch).
+  const variants = useMemo(() => {
+    try {
+      const models = buildZombieModels();
+      models.forEach(() => { Diag.attemptModel(); Diag.loadModel(); });
+      return models;
+    } catch (err) {
+      Diag.setLoadError('zombie models', err);
+      return null; // coloured boxes keep the horde visible
+    }
+  }, []);
   const meshes = useRef<(InstancedMesh | null)[]>([]);
   const fallback = useRef<InstancedMesh | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    Promise.allSettled(CHARACTER_IDS.map((id) => loadCharacter(id).then(mergeCharacterGeometry))).then((results) => {
-      if (!alive) return;
-      const ok = results.map((r) => (r.status === 'fulfilled' ? r.value : null));
-      const firstGood = ok.find((v) => v !== null) ?? null;
-      results.forEach((r) => { if (r.status === 'rejected') Diag.setLoadError('horde', r.reason); });
-      // A variant that failed to load borrows a working one rather than disappearing.
-      if (firstGood) setVariants(ok.map((v) => v ?? firstGood));
-    });
-    return () => { alive = false; };
-  }, []);
 
   useFrame(() => {
     const zs = world.zombies;

@@ -7,6 +7,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { stripExternalImageUris, prepareScene, bakeVertexColors } from '../src/render/glbCommon';
 import { mergeCharacterGeometry, composeZombieMatrix, composeGroundDiscMatrix, headingFromVelocity, ZOMBIE_TINT } from '../src/render/hordeGeometry';
 import { createWorld, step, MAX_BLOOD_SPOTS, UpdateInput } from '../src/game/engine';
+import { bakeCharacters, BAKED_PATH } from '../tools/bake-characters';
+import { buildZombieModels } from '../src/render/zombieModels';
+import { CHARACTER_IDS } from '../src/assets/characters';
 import { DEFAULT_PROGRESS } from '../src/store/progressLogic';
 
 const root = path.resolve(__dirname, '..');
@@ -18,7 +21,7 @@ const CHARS = 'abcdefghijklmnopqr'.split('');
 
 test('every character GLB parses on the runtime path, bakes colours and merges to one draw call', async () => {
   for (const id of CHARS) {
-    const gltf = await parse(`assets/character-${id}.glb`);
+    const gltf = await parse(`assets-source/characters/character-${id}.glb`);
     prepareScene(gltf.scene);
     bakeVertexColors(gltf.scene, flatPalette);
     const merged = mergeCharacterGeometry(gltf.scene);
@@ -47,7 +50,7 @@ test('every player vehicle GLB parses and has a sane size', async () => {
 });
 
 test('sanitiser leaves no texture or image references (they crash the renderer on RN)', () => {
-  const buf = stripExternalImageUris(abuf('assets/character-a.glb'));
+  const buf = stripExternalImageUris(abuf('assets-source/characters/character-a.glb'));
   const dv = new DataView(buf);
   const jsonLen = dv.getUint32(12, true);
   const json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jsonLen)));
@@ -103,4 +106,34 @@ test('blood spots are bounded when a horde dies at once (regression: unbounded a
   }
   assert.ok(w.kills > 100, `kills ${w.kills}`);
   assert.ok(w.bloodSpots.length <= MAX_BLOOD_SPOTS);
+});
+
+test('committed zombie bake is up to date with the source GLBs and palettes (re-run tools/bake-characters.ts if this fails)', async () => {
+  const fresh = await bakeCharacters(root);
+  const committed = JSON.parse(fs.readFileSync(path.join(root, BAKED_PATH), 'utf8'));
+  assert.deepEqual(committed, fresh);
+});
+
+test('runtime zombie models: 18 variants, shared positions, valid linear colours, standing on the ground', () => {
+  const models = buildZombieModels();
+  assert.equal(models.length, CHARACTER_IDS.length);
+  const pos0 = models[0].geometry.getAttribute('position').array;
+  for (const m of models) {
+    assert.equal(m.geometry.getAttribute('position').array, pos0, 'positions are shared, not copied');
+    const col = m.geometry.getAttribute('color').array as Float32Array;
+    assert.equal(col.length, pos0.length);
+    for (const v of col) assert.ok(v >= 0 && v <= 1);
+    assert.ok(m.triangles > 20 && Number.isFinite(m.minY));
+  }
+  // variants must actually differ visually
+  const sums = models.map((m) => (m.geometry.getAttribute('color').array as Float32Array).reduce((a, b) => a + b, 0));
+  assert.ok(new Set(sums.map((v) => v.toFixed(3))).size > 6, 'palettes should give distinct looks');
+  assert.throws(() => buildZombieModels({ ...JSON.parse(fs.readFileSync(path.join(root, BAKED_PATH), 'utf8')), version: 2 } as any), /unsupported/);
+});
+
+test('zombie models are no longer bundled or parsed at runtime', () => {
+  const horde = fs.readFileSync(path.join(root, 'src/components/ZombieHorde.tsx'), 'utf8');
+  assert.doesNotMatch(horde, /loadCharacter|GLTFLoader|paletteSampler/);
+  assert.ok(!fs.existsSync(path.join(root, 'src/render/loadCharacter.ts')));
+  assert.ok(!fs.readFileSync(path.join(root, 'src/assets/characters.ts'), 'utf8').includes('require('));
 });
