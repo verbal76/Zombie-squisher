@@ -45,6 +45,7 @@ export function UiGallery() {
   const input = useRef<ControlInput>({ steerLeft: false, steerRight: false, turbo: false, gear: 'forward', autoFire: true });
   const world = useMemo(() => {
     const w = createWorld(1200, 1200, progress);
+    w.zombies.push({ id: 1, x: w.carX + 60, y: w.carY - 80, vx: 0, vy: 0, hp: 310, maxHp: 520, kind: 'boss', size: 22, attackCooldown: 0 });
     w.kills = 87; w.wave = 3; w.hp = Number(q.get('hp') ?? 22); w.streak = 12; w.momentum = 0.8; w.abilityCooldown = 2500;
     return w;
   }, [progress]);

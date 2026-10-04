@@ -66,6 +66,39 @@ function StreakBanner({ world }: { world: World }) {
 }
 
 
+/** Boss health: the README promises a visible boss HP bar, but none was ever rendered. */
+function BossBar({ world, top }: { world: World; top: number }) {
+  let boss: { hp: number; maxHp: number } | null = null;
+  let best = Infinity;
+  for (const z of world.zombies) {
+    if (z.kind !== 'boss' || z.hp <= 0) continue;
+    const d = (z.x - world.carX) ** 2 + (z.y - world.carY) ** 2;
+    if (d < best) { best = d; boss = z; }
+  }
+  if (!boss) return null;
+  const pct = Math.max(0, Math.min(1, boss.hp / Math.max(1, boss.maxHp)));
+  return (
+    <View style={[styles.bossWrap, { top }]} pointerEvents="none" accessibilityLabel={`Boss health ${Math.round(pct * 100)} percent`}>
+      <Text style={styles.bossLabel}>BOSS</Text>
+      <View style={styles.bossBar}><View style={[styles.bossFill, { width: `${pct * 100}%` }]} /></View>
+    </View>
+  );
+}
+
+/** Red edge flash whenever the car takes a hit (there was no damage feedback besides camera shake). */
+function DamageFlash({ world }: { world: World }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const seen = useRef(world.hitCount);
+  useEffect(() => {
+    if (world.hitCount === seen.current) return;
+    seen.current = world.hitCount;
+    opacity.stopAnimation();
+    opacity.setValue(0.9);
+    Animated.timing(opacity, { toValue: 0, duration: 280, useNativeDriver: true }).start();
+  });
+  return <Animated.View pointerEvents="none" style={[styles.flash, { opacity }]} />;
+}
+
 interface HudProps {
   world: World;
   vehicle: Vehicle;
@@ -106,6 +139,8 @@ export function GameHud({ world: w, vehicle, ability, abilityEquipped, insets, d
       </View>
 
       <StreakBanner world={w} />
+      <DamageFlash world={w} />
+      <BossBar world={w} top={hudTop} />
 
       <Pressable accessibilityLabel="Pause" style={[styles.iconBtn, { top: hudTop - 2, right: insets.right + 60 }]} onPress={onPause} hitSlop={8}>
         <Text style={styles.iconText}>❚❚</Text>
@@ -184,6 +219,11 @@ const styles = StyleSheet.create({
   gaugeLabel: { ...type.label, color: colors.dim, fontSize: 10 },
   gaugeReadout: { ...type.label, color: colors.text, fontSize: 10 },
   streakText: { ...type.title, color: colors.hazard, fontSize: 14, marginTop: 4, letterSpacing: 1 },
+  flash: { ...StyleSheet.absoluteFillObject, borderWidth: 16, borderColor: 'rgba(227,74,74,0.75)', zIndex: 5 },
+  bossWrap: { position: 'absolute', alignSelf: 'center', left: '50%', marginLeft: -110, width: 220, alignItems: 'center', zIndex: 6 },
+  bossLabel: { ...type.title, color: colors.danger, fontSize: 12, letterSpacing: 4, textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  bossBar: { alignSelf: 'stretch', height: 12, borderRadius: 6, backgroundColor: 'rgba(30,8,8,0.85)', borderWidth: 2, borderColor: colors.danger, overflow: 'hidden', marginTop: 2 },
+  bossFill: { height: '100%', backgroundColor: colors.danger },
   streakBanner: { position: 'absolute', top: '32%', left: 0, right: 0, alignItems: 'center', zIndex: 20 },
   streakBannerText: { ...type.title, color: colors.hazard, fontSize: 32, textShadowColor: '#000', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 4 },
   pauseOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.72)', alignItems: 'center', justifyContent: 'center', zIndex: 30 },
