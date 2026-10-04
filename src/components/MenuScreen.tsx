@@ -6,14 +6,18 @@ import { VEHICLES } from '../data/vehicles';
 import { WEAPONS, ABILITIES } from '../data/weapons';
 import { SIDE_MODS } from '../data/sideMods';
 import { AboutModal } from './AboutModal';
+import { ToggleChip } from './ToggleChip';
+import { Settings } from '../store/settingsLogic';
 
 interface Props {
   progress: Progress;
   onPlay: () => void;
   onGarage: () => void;
+  settings: Settings;
+  onSettings: (s: Settings) => void;
 }
 
-export function MenuScreen({ progress, onPlay, onGarage }: Props) {
+export function MenuScreen({ progress, onPlay, onGarage, settings, onSettings }: Props) {
   const [aboutOpen, setAboutOpen] = useState(false);
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -69,6 +73,10 @@ export function MenuScreen({ progress, onPlay, onGarage }: Props) {
         <Pressable style={styles.garageBtn} onPress={onGarage}>
           <Text style={styles.garageText}>GARAGE</Text>
         </Pressable>
+        <View style={styles.toggles}>
+          <ToggleChip label="SOUND FX" on={settings.sfx} onPress={() => onSettings({ ...settings, sfx: !settings.sfx })} />
+          <ToggleChip label="MUSIC" on={settings.music} onPress={() => onSettings({ ...settings, music: !settings.music })} />
+        </View>
         </View>
         </View>
       </ScrollView>
@@ -112,5 +120,6 @@ const styles = StyleSheet.create({
   playBtn: { backgroundColor: '#e34a4a', paddingHorizontal: 64, paddingVertical: 16, borderRadius: 14, marginBottom: 12 },
   playText: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: 4 },
   garageBtn: { paddingHorizontal: 32, paddingVertical: 12, borderRadius: 10, borderWidth: 2, borderColor: '#ffd24a' },
+  toggles: { flexDirection: 'row', gap: 10, marginTop: 14 },
   garageText: { color: '#ffd24a', fontWeight: '800', letterSpacing: 2 },
 });

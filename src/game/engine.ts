@@ -43,6 +43,10 @@ export interface World {
   streakBannerKind: StreakBannerKind;
   streakBannerAt: number;
   momentum: number;
+  /** Monotonic counters read by the audio layer (never reset during a run). */
+  shotCount: number;
+  lastShotKind: ProjectileKind | null;
+  hitCount: number;
 }
 
 export type StreakBannerKind = 'spree' | 'reaper' | 'breaker' | 'apocalypse' | null;
@@ -150,6 +154,9 @@ export function createWorld(width: number, height: number, p: Progress): World {
     streakBannerKind: null,
     streakBannerAt: 0,
     momentum: 0,
+    shotCount: 0,
+    lastShotKind: null,
+    hitCount: 0,
   };
 }
 
@@ -430,6 +437,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
         if (!isShielded && world.invuln <= 0) {
           world.hp -= def.contactDamage * 0.4;
           world.invuln = 120;
+          world.hitCount += 1;
         }
       } else {
         // Side hit (any speed) OR slow contact at the bumper. Either
@@ -442,6 +450,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
         if (z.attackCooldown <= 0) {
           if (!isShielded) {
             world.hp -= def.contactDamage * 0.6;
+            world.hitCount += 1;
           }
 
           z.attackCooldown = 0.5;
@@ -634,6 +643,8 @@ function spawnZombie(world: World, forceBoss: boolean): void {
 }
 
 function fireWeapon(world: World, weapon: Weapon, vehicle: Vehicle): void {
+  world.shotCount += 1;
+  world.lastShotKind = weapon.id === 'rockets' ? 'rocket' : (weapon.id as ProjectileKind);
   const fwdX = Math.sin(world.heading);
   const fwdY = -Math.cos(world.heading);
   const muzzleDist = vehicle.height / 2 + 4;

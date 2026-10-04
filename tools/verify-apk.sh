@@ -16,7 +16,7 @@ echo "$BADGING" | grep -E "^package:|^sdkVersion|^targetSdkVersion|^application-
 echo "$BADGING" | grep -q "package: name='$PKG' versionCode='$VCODE' versionName='$VNAME'" || fail "identity mismatch (want $PKG $VCODE $VNAME)"
 TSDK="$(echo "$BADGING" | sed -n "s/^targetSdkVersion:'\([0-9]*\)'.*/\1/p")"
 [ "${TSDK:-0}" -ge 35 ] || fail "targetSdk ${TSDK:-?} < 35"
-for perm in SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE; do
+for perm in SYSTEM_ALERT_WINDOW READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE RECORD_AUDIO MODIFY_AUDIO_SETTINGS FOREGROUND_SERVICE FOREGROUND_SERVICE_MEDIA_PLAYBACK; do
   echo "$BADGING" | grep -q "uses-permission: name='android.permission.$perm'" && fail "unexpected permission $perm"
 done
 echo "identity/target SDK/permissions: OK (targetSdk $TSDK)"

@@ -6,7 +6,7 @@ import { Box3, Object3D, Vector3 } from 'three';
 import { Progress, Vehicle, Projectile } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
-import { World, createWorld, step, KILL_SPEED, StreakBannerKind, TUNING, GearState } from '../game/engine';
+import { World, createWorld, step, deriveStats, KILL_SPEED, StreakBannerKind, TUNING, GearState } from '../game/engine';
 import { VEHICLE_GLB } from '../data/objects';
 import { loadVehicleGLB } from '../render/loadVehicle';
 import { AboutModal } from './AboutModal';
@@ -14,9 +14,16 @@ import { ZombieHorde } from './ZombieHorde';
 import { BloodSplats } from './BloodSplats';
 import { getGrassTexture } from '../render/grassTexture';
 import { Diag } from '../debug/diagnostics';
+import { AudioDirector } from '../audio/audioDirector';
+import { createExpoAudioBackend } from '../audio/expoAudioBackend';
+import { Settings } from '../store/settingsLogic';
+import { ToggleChip } from './ToggleChip';
+import { SoundId } from '../audio/soundIds';
 
 interface Props {
   progress: Progress;
+  settings: Settings;
+  onSettings: (s: Settings) => void;
   onEnd: (kills: number) => void;
 }
 
@@ -99,7 +106,7 @@ const HORIZON_BUILDINGS: HorizonBuilding[] = (() => {
   return out;
 })();
 
-export function GameScreen({ progress, onEnd }: Props) {
+export function GameScreen({ progress, settings, onSettings, onEnd }: Props) {
   const worldRef = useRef<World | null>(null);
   if (worldRef.current === null) worldRef.current = createWorld(ARENA_W, ARENA_H, progress);
   const insets = useSafeAreaInsets();
@@ -111,8 +118,13 @@ export function GameScreen({ progress, onEnd }: Props) {
   const progressRef = useRef(progress);
   progressRef.current = progress;
   const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const directorRef = useRef<AudioDirector | null>(null);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const maxSpeedRef = useRef(deriveStats(progress).stats.speed);
   const setPaused = (p: boolean) => {
     pausedRef.current = p;
+    if (p) directorRef.current?.pause(); else directorRef.current?.resume();
     if (p) {
       // Release held inputs so nothing is stuck on when the game resumes.
       steerLeftRef.current = false;
@@ -196,6 +208,7 @@ export function GameScreen({ progress, onEnd }: Props) {
           triggerAbility: abilityTriggerRef.current,
         }, progressRef.current);
         abilityTriggerRef.current = false;
+        directorRef.current?.update({ world: w, maxSpeed: maxSpeedRef.current, ability: progressRef.current.selectedAbility });
       }
       if (now - lastHudTick >= HUD_TICK_MS) {
         lastHudTick = now;
@@ -213,6 +226,31 @@ export function GameScreen({ progress, onEnd }: Props) {
       if (endTimer.current) clearTimeout(endTimer.current);
     };
   }, []);
+
+  // Audio: created once per run, always fully released on exit. Failures only log (the director disables itself).
+  useEffect(() => {
+    let d: AudioDirector | null = null;
+    try {
+      d = new AudioDirector(
+        createExpoAudioBackend(), settingsRef.current, undefined, undefined,
+        (where, err) => console.warn('audio', where, (err as Error)?.message ?? err),
+      );
+      d.start(worldRef.current!);
+      const p = progressRef.current;
+      const weaponSound: Partial<Record<string, SoundId>> = { mg: 'shot_mg', flame: 'flame', rockets: 'rocket', laser: 'laser' };
+      const abilitySound: Partial<Record<string, SoundId>> = { nitro: 'nitro', shield: 'shield', emp: 'emp' };
+      const warm = (['squish_1', 'squish_2', 'hit_1', 'streak', 'gameover', 'ui_click', weaponSound[p.selectedWeapon], abilitySound[p.selectedAbility]] as (SoundId | undefined)[])
+        .filter((x): x is SoundId => !!x);
+      d.prewarm(warm);
+    } catch (err) {
+      console.warn('audio init failed', (err as Error)?.message ?? err);
+      d = null;
+    }
+    directorRef.current = d;
+    return () => { d?.dispose(); directorRef.current = null; };
+  }, []);
+
+  useEffect(() => { directorRef.current?.setSettings(settings); }, [settings]);
 
   // Auto-pause whenever the app leaves the foreground.
   useEffect(() => {
@@ -447,9 +485,13 @@ export function GameScreen({ progress, onEnd }: Props) {
       {paused && !aboutOpen && !w.gameOver && (
         <View style={styles.pauseOverlay}>
           <Text style={styles.pauseTitle}>PAUSED</Text>
-          <Pressable style={styles.pauseBtn} onPress={() => setPaused(false)}>
+          <Pressable style={styles.pauseBtn} onPress={() => { directorRef.current?.click(); setPaused(false); }}>
             <Text style={styles.pauseBtnText}>RESUME</Text>
           </Pressable>
+          <View style={styles.pauseToggles}>
+            <ToggleChip label="SOUND FX" on={settings.sfx} onPress={() => onSettings({ ...settings, sfx: !settings.sfx })} />
+            <ToggleChip label="MUSIC" on={settings.music} onPress={() => onSettings({ ...settings, music: !settings.music })} />
+          </View>
           <Pressable
             style={[styles.pauseBtn, styles.pauseBtnAlt]}
             onPress={() => { setPaused(false); w.hp = 0; w.gameOver = true; }}
@@ -791,6 +833,7 @@ const styles = StyleSheet.create({
 
   pauseOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', zIndex: 30 },
   pauseTitle: { color: '#ffd24a', fontWeight: '900', fontSize: 34, letterSpacing: 4, marginBottom: 14 },
+  pauseToggles: { flexDirection: 'row', gap: 10, marginTop: 14 },
   pauseBtn: { minWidth: 200, paddingVertical: 14, borderRadius: 12, backgroundColor: '#ffd24a', alignItems: 'center', marginTop: 10 },
   pauseBtnAlt: { backgroundColor: '#e34a4a' },
   pauseBtnText: { color: '#0a0a0a', fontWeight: '900', fontSize: 16, letterSpacing: 2 },

@@ -45,7 +45,7 @@ test('Android baseline: target/compile SDK >= 36, no unneeded permissions', () =
   assert.ok(bp.targetSdkVersion >= 35);
   assert.ok(bp.compileSdkVersion >= bp.targetSdkVersion);
   assert.ok(!('kotlinVersion' in bp), 'Kotlin pin must stay removed: SDK 54 manages it');
-  for (const perm of ['SYSTEM_ALERT_WINDOW', 'READ_EXTERNAL_STORAGE', 'WRITE_EXTERNAL_STORAGE']) {
+  for (const perm of ['SYSTEM_ALERT_WINDOW', 'READ_EXTERNAL_STORAGE', 'WRITE_EXTERNAL_STORAGE', 'RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_MEDIA_PLAYBACK']) {
     assert.ok(app.android.blockedPermissions.includes(`android.permission.${perm}`), perm);
   }
 });

@@ -11,6 +11,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Progress } from './src/types';
 import { applyKills, loadProgress, saveProgress } from './src/store/progress';
+import { DEFAULT_SETTINGS, Settings, loadSettings, saveSettings } from './src/store/settings';
 import { MenuScreen } from './src/components/MenuScreen';
 import { GameScreen } from './src/components/GameScreen';
 import { GarageScreen } from './src/components/GarageScreen';
@@ -33,19 +34,22 @@ type Scene =
 export default function App() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [scene, setScene] = useState<Scene>({ name: 'splash' });
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const [otaReady, setOtaReady] = useState(false);
   const onSplashDone = useCallback(() => setSplashDone(true), []);
 
   useEffect(() => {
     loadProgress().then(setProgress);
+    loadSettings().then((s) => { setSettings(s); setSettingsLoaded(true); });
     checkOtaUpdate().then((ready) => { if (ready) setOtaReady(true); });
   }, []);
 
   // Leave the splash once the branded screen has played AND the save has loaded.
   useEffect(() => {
-    if (scene.name === 'splash' && splashDone && progress) setScene({ name: 'menu' });
-  }, [scene.name, splashDone, progress]);
+    if (scene.name === 'splash' && splashDone && progress && settingsLoaded) setScene({ name: 'menu' });
+  }, [scene.name, splashDone, progress, settingsLoaded]);
 
   // A downloaded OTA is applied only from the menu, never mid-run.
   useEffect(() => {
@@ -56,7 +60,11 @@ export default function App() {
     if (progress) saveProgress(progress);
   }, [progress]);
 
-  if (scene.name === 'splash' || !progress) {
+  useEffect(() => {
+    if (settingsLoaded) saveSettings(settings);
+  }, [settings, settingsLoaded]);
+
+  if (scene.name === 'splash' || !progress || !settingsLoaded) {
     return (
       <SafeAreaProvider style={{ flex: 1, backgroundColor: SPLASH_BG }}>
         <StatusBar style="light" />
@@ -79,11 +87,15 @@ export default function App() {
           progress={progress}
           onPlay={() => setScene({ name: 'game' })}
           onGarage={() => setScene({ name: 'garage' })}
+          settings={settings}
+          onSettings={setSettings}
         />
       )}
       {scene.name === 'game' && (
         <GameScreen
           progress={progress}
+          settings={settings}
+          onSettings={setSettings}
           onEnd={(kills) => {
             const before = progress;
             const next = applyKills(progress, kills);
