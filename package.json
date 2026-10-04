@@ -1,0 +1,25 @@
+{
+  "name": "zombie-crusher",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "test": "node --no-warnings --test tests/*.test.js",
+    "doctor": "expo-doctor"
+  },
+  "dependencies": {
+    "expo": "~57.0.26",
+    "expo-build-properties": "~57.0.22",
+    "expo-constants": "~57.0.20",
+    "expo-keep-awake": "~57.0.2",
+    "expo-screen-orientation": "~57.0.2",
+    "expo-splash-screen": "~57.0.9",
+    "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.4",
+    "react": "^19.2.3",
+    "react-native": "^0.86.3",
+    "react-native-safe-area-context": "~5.7.0"
+  }
+}
