@@ -20,6 +20,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Lint workflows
+        run: pip install actionlint-py && actionlint
       - run: npm ci
       - name: Typecheck and tests
         run: npm run check

@@ -50,7 +50,7 @@ jobs:
         with:
           files: dist/*
           tag_name: ${{ format('apk-build-{0}', github.run_number) }}
-          name: ${{ format('{0} (build #{1})', needs.apk.outputs.artifact_name, github.run_number) }}
+          name: "${{ format('{0} (build {1})', needs.apk.outputs.artifact_name, github.run_number) }}"
           prerelease: false
           make_latest: "true"
           generate_release_notes: true
