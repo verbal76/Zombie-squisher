@@ -1,0 +1,34 @@
+name: CI
+
+# Fast checks on every branch and PR. No secrets, no publishing, no OTA.
+on:
+  push:
+    branches-ignore:
+      - 'Github-build-pipeline-zombie-crusher'   # its own pipeline runs the same checks before building
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck and tests
+        run: npm run check
+      - name: Brand assets
+        run: npm run prepare-assets
+      - name: Bundle check (Metro, Hermes)
+        run: CI=1 npx expo export --platform android --output-dir "$RUNNER_TEMP/export"
+      - name: Native project generation check
+        run: CI=1 npx expo prebuild --platform android --no-install
+      - name: Dependency compatibility (expo-doctor)
+        run: npx expo-doctor
+        continue-on-error: true

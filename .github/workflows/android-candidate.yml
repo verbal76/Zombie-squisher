@@ -1,0 +1,22 @@
+name: Android Candidate APK
+
+# Builds an owner-testable APK from working branches. It does not publish a release or an OTA.
+on:
+  push:
+    branches: ['ccr-**', 'candidate/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    uses: ./.github/workflows/build-apk.yml
+    with:
+      profile: preview
+    secrets:
+      EXPO_TOKEN: ${{ secrets.ZOMBIE }}
