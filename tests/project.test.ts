@@ -110,3 +110,17 @@ test('no secrets, keystores or env files are tracked', () => {
   const tracked = execSync('git ls-files', { cwd: root }).toString().split('\n');
   assert.deepEqual(tracked.filter((f) => /\.(jks|keystore|p12|pem|key)$|google-services|(^|\/)\.env/.test(f)), []);
 });
+
+test('Gradle memory plugin is registered and gives Metaspace headroom (regression: KSP OOM + daemon hang in CI)', () => {
+  assert.ok(app.plugins.includes('./plugins/with-gradle-memory.js'));
+  const { SETTINGS } = require('../plugins/with-gradle-memory.js');
+  const meta = Number(/MaxMetaspaceSize=(\d+)m/.exec(SETTINGS['org.gradle.jvmargs'])![1]);
+  assert.ok(meta >= 1024, `gradle metaspace ${meta}m`);
+  assert.ok(Number(/-Xmx(\d+)m/.exec(SETTINGS['org.gradle.jvmargs'])![1]) >= 3072);
+  assert.ok(/MaxMetaspaceSize=(\d+)m/.test(SETTINGS['kotlin.daemon.jvmargs']));
+});
+
+test('CI never lets the APK build stall: the EAS step has its own timeout', () => {
+  const wf = fs.readFileSync(path.join(root, '.github/workflows/build-apk.yml'), 'utf8');
+  assert.match(wf, /Build with EAS[\s\S]*?timeout-minutes: \d+/);
+});

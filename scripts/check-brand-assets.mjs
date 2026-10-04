@@ -7,6 +7,7 @@ import fs from 'node:fs';
 const REQUIRED = [
   'assets/brand/icon.png',
   'assets/brand/adaptive-icon-foreground.png',
+  'assets/brand/adaptive-icon-monochrome.png',
   'assets/brand/splash-blank.png',
   'assets/brand/hag-logo.png',
 ];

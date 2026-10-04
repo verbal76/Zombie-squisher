@@ -30,7 +30,11 @@ jobs:
       - name: Bundle check (Metro, Hermes)
         run: CI=1 npx expo export --platform android --output-dir "$RUNNER_TEMP/export"
       - name: Native project generation check
-        run: CI=1 npx expo prebuild --platform android --no-install
+        run: |
+          CI=1 npx expo prebuild --platform android --no-install
+          # Gradle needs more Metaspace than the template's 512m for KSP (OOM + daemon hang seen in CI)
+          grep -q 'MaxMetaspaceSize=1536m' android/gradle.properties
+          grep -q 'versionCode 2' android/app/build.gradle || grep -q "versionCode $(node -p "require('./app.json').expo.android.versionCode")" android/app/build.gradle
       - name: Dependency compatibility (expo-doctor)
         run: npx expo-doctor
         continue-on-error: true

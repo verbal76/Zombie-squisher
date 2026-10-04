@@ -24,7 +24,8 @@
       "package": "com.verbal76.zombiesquisher",
       "adaptiveIcon": {
         "foregroundImage": "./assets/brand/adaptive-icon-foreground.png",
-        "backgroundColor": "#1e321e"
+        "backgroundColor": "#1a120c",
+        "monochromeImage": "./assets/brand/adaptive-icon-monochrome.png"
       },
       "versionCode": 2,
       "predictiveBackGestureEnabled": false,
@@ -67,7 +68,8 @@
           }
         }
       ],
-      "./plugins/with-no-compress-glb.js"
+      "./plugins/with-no-compress-glb.js",
+      "./plugins/with-gradle-memory.js"
     ],
     "extra": {
       "eas": {

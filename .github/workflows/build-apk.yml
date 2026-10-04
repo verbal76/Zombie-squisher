@@ -59,6 +59,9 @@ jobs:
       - name: Brand assets
         run: npm run prepare-assets
       - name: Build with EAS (local, no EAS build minutes)
+        # A healthy build takes ~15 min. Fail fast: a Gradle daemon can deadlock after an OOM and would otherwise
+        # burn the whole job timeout (seen: 74 min).
+        timeout-minutes: 40
         run: |
           mkdir -p build
           eas build --platform android --profile "${{ inputs.profile }}" --local --non-interactive --output build/raw.apk
