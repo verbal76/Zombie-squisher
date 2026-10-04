@@ -68,7 +68,7 @@ test('brand assets are complete, valid PNGs', () => {
 });
 
 test('every asset required by source code exists (no missing-asset crash at runtime)', () => {
-  const files = walk(path.join(root, 'src')).concat(path.join(root, 'App.tsx')).filter((f) => /\.(ts|tsx)$/.test(f));
+  const files = walk(path.join(root, "src")).concat(path.join(root, 'App.tsx')).filter((f) => /\.(ts|tsx)$/.test(f));
   let checked = 0;
   for (const f of files) {
     // strip comments so documentation examples (e.g. assets/X.glb) are not treated as requires

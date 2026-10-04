@@ -56,6 +56,9 @@ export const ZOMBIE_FLEE_STREAK = 10;
 // performance. 500 lets the horde feel dense without crashing the render.
 export const MAX_ACTIVE_ZOMBIES = 500;
 
+// Blood decals are purely visual; keep the oldest from piling up when a horde dies at once.
+export const MAX_BLOOD_SPOTS = 300;
+
 // Each zombie struck by the front/rear bumper bleeds this fraction off
 // the car's speed (cumulative across all zombies hit this tick). Plowing
 // into a large horde can stall the car out -- per design request.
@@ -552,6 +555,10 @@ function spawnBlood(world: World, z: Zombie): void {
       size: z.size * (0.5 + Math.random() * 0.6),
       alpha: 0.85,
     });
+  }
+
+  if (world.bloodSpots.length > MAX_BLOOD_SPOTS) {
+    world.bloodSpots.splice(0, world.bloodSpots.length - MAX_BLOOD_SPOTS);
   }
 }
 

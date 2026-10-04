@@ -61,6 +61,10 @@ export const CHARACTER_TEX: Record<CharacterId, number> = {
 };
 
 // Pick a stable character variant from a zombie id.
+export function zombieVariantIndex(zombieId: number): number {
+  return zombieId % CHARACTER_IDS.length;
+}
+
 export function pickCharacterIdForZombie(zombieId: number): CharacterId {
-  return CHARACTER_IDS[zombieId % CHARACTER_IDS.length];
+  return CHARACTER_IDS[zombieVariantIndex(zombieId)];
 }

@@ -3,14 +3,15 @@ import { Animated, AppState, GestureResponderEvent, Pressable, StyleSheet, Text,
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Canvas, useFrame } from '@react-three/fiber/native';
 import { Box3, Object3D, Vector3 } from 'three';
-import { Progress, Vehicle, Projectile, BloodSpot } from '../types';
+import { Progress, Vehicle, Projectile } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
 import { World, createWorld, step, KILL_SPEED, StreakBannerKind, TUNING, GearState } from '../game/engine';
 import { VEHICLE_GLB } from '../data/objects';
 import { loadVehicleGLB } from '../render/loadVehicle';
 import { AboutModal } from './AboutModal';
-import { ZombieCharacter } from './ZombieCharacter';
+import { ZombieHorde } from './ZombieHorde';
+import { BloodSplats } from './BloodSplats';
 import { getGrassTexture } from '../render/grassTexture';
 import { Diag } from '../debug/diagnostics';
 
@@ -326,12 +327,8 @@ export function GameScreen({ progress, onEnd }: Props) {
 
         <CarMesh world={w} vehicle={vehicle} />
 
-        {w.bloodSpots.map((b) => (
-          <BloodMesh key={b.id} blood={b} />
-        ))}
-        {w.zombies.map((z) => (
-          <ZombieCharacter key={z.id} z={z} />
-        ))}
+        <BloodSplats world={w} />
+        <ZombieHorde world={w} />
         {w.projectiles.map((pr) => (
           <ProjectileMesh key={pr.id} pr={pr} />
         ))}
@@ -579,21 +576,6 @@ function CameraTracker({ world, vehicle }: { world: World; vehicle: Vehicle }) {
     state.camera.lookAt(lookX, 0, lookZ);
   });
   return null;
-}
-
-function BloodMesh({ blood }: { blood: BloodSpot }) {
-  const meshRef = useRef<any>(null);
-  const matRef = useRef<any>(null);
-  useFrame(() => {
-    if (meshRef.current) meshRef.current.position.set(blood.x, 0.5, blood.y);
-    if (matRef.current) matRef.current.opacity = Math.max(0, blood.alpha);
-  });
-  return (
-    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
-      <circleGeometry args={[blood.size, 10]} />
-      <meshBasicMaterial ref={matRef} color={'#3a0a0a'} transparent opacity={blood.alpha} />
-    </mesh>
-  );
 }
 
 const CAR_VISUAL_SCALE = 1.2;

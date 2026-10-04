@@ -6,11 +6,13 @@
 
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
-import { BufferAttribute, Group, MeshBasicMaterial, Object3D } from 'three';
+import { Group, Object3D } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CHARACTER_GLB, CHARACTER_TEX, CharacterId } from '../assets/characters';
 import { Diag } from '../debug/diagnostics';
-import { getPaletteSampler, PaletteSampler } from './paletteSampler';
+import { getPaletteSampler } from './paletteSampler';
+import { base64ToArrayBuffer, bakeVertexColors, prepareScene, stripExternalImageUris } from './glbCommon';
+
 
 const cache: Partial<Record<CharacterId, Group>> = {};
 const loading: Partial<Record<CharacterId, Promise<Group>>> = {};
@@ -19,122 +21,7 @@ async function fetchBuffer(uri: string): Promise<ArrayBuffer> {
   const b64 = await FileSystem.readAsStringAsync(uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
-  const binStr = atob(b64);
-  const bytes = new Uint8Array(binStr.length);
-  for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
-  return bytes.buffer;
-}
-
-// See the matching comment in loadVehicle.ts: we must strip the entire
-// images/textures arrays AND every texture reference inside each material
-// from the GLB's JSON header, not just the image URIs. The previous "delete
-// img.uri" approach left empty image entries behind that GLTFLoader then
-// rejected with "Image N is missing URI and bufferView", which threw before
-// our post-parse texture strip could run.
-function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
-  const view = new DataView(buffer);
-  if (view.getUint32(0, true) !== 0x46546c67) return buffer;
-  const totalLen = view.getUint32(8, true);
-  const jsonLen = view.getUint32(12, true);
-  const jsonStart = 20;
-  const jsonBytes = new Uint8Array(buffer, jsonStart, jsonLen);
-  const jsonStr = new TextDecoder().decode(jsonBytes);
-  const gltf = JSON.parse(jsonStr);
-  let touched = false;
-
-  if (Array.isArray(gltf.images) && gltf.images.length > 0) {
-    gltf.images = [];
-    touched = true;
-  }
-  if (Array.isArray(gltf.textures) && gltf.textures.length > 0) {
-    gltf.textures = [];
-    touched = true;
-  }
-  if (Array.isArray(gltf.materials)) {
-    const matSlots = [
-      'normalTexture', 'occlusionTexture', 'emissiveTexture',
-    ];
-    const pbrSlots = [
-      'baseColorTexture', 'metallicRoughnessTexture',
-    ];
-    const extSlots: Record<string, string[]> = {
-      KHR_materials_clearcoat: ['clearcoatTexture', 'clearcoatRoughnessTexture', 'clearcoatNormalTexture'],
-      KHR_materials_sheen: ['sheenColorTexture', 'sheenRoughnessTexture'],
-      KHR_materials_transmission: ['transmissionTexture'],
-      KHR_materials_volume: ['thicknessTexture'],
-      KHR_materials_iridescence: ['iridescenceTexture', 'iridescenceThicknessTexture'],
-      KHR_materials_anisotropy: ['anisotropyTexture'],
-      KHR_materials_specular: ['specularTexture', 'specularColorTexture'],
-    };
-    for (const mat of gltf.materials) {
-      for (const k of matSlots) {
-        if (mat[k]) { delete mat[k]; touched = true; }
-      }
-      if (mat.pbrMetallicRoughness) {
-        for (const k of pbrSlots) {
-          if (mat.pbrMetallicRoughness[k]) { delete mat.pbrMetallicRoughness[k]; touched = true; }
-        }
-      }
-      if (mat.extensions) {
-        for (const extName of Object.keys(extSlots)) {
-          const ext = mat.extensions[extName];
-          if (!ext) continue;
-          for (const k of extSlots[extName]) {
-            if (ext[k]) { delete ext[k]; touched = true; }
-          }
-        }
-      }
-    }
-  }
-
-  if (!touched) return buffer;
-
-  let newJson = JSON.stringify(gltf);
-  while (newJson.length % 4 !== 0) newJson += ' ';
-  const newJsonBytes = new TextEncoder().encode(newJson);
-
-  const binChunkOffset = 20 + jsonLen;
-  const binChunkLen = totalLen - binChunkOffset;
-  const binBytes = new Uint8Array(buffer, binChunkOffset, binChunkLen);
-
-  const newTotal = 12 + 8 + newJsonBytes.length + binBytes.length;
-  const out = new Uint8Array(newTotal);
-  const outView = new DataView(out.buffer);
-  outView.setUint32(0, 0x46546c67, true);
-  outView.setUint32(4, 2, true);
-  outView.setUint32(8, newTotal, true);
-  outView.setUint32(12, newJsonBytes.length, true);
-  outView.setUint32(16, 0x4e4f534a, true);
-  out.set(newJsonBytes, 20);
-  out.set(binBytes, 20 + newJsonBytes.length);
-  return out.buffer;
-}
-
-function bakeVertexColors(scene: Group, sampler: PaletteSampler): void {
-  scene.traverse((node: any) => {
-    if (!node.isMesh || !node.geometry) return;
-    const geom = node.geometry;
-    const uv = geom.getAttribute('uv');
-    if (!uv) {
-      node.material = new MeshBasicMaterial({ color: 0x888888 });
-      return;
-    }
-    const count = uv.count;
-    const colors = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      const u = uv.getX(i);
-      const v = uv.getY(i);
-      const rgb = sampler.sample(u, v);
-      colors[i * 3]     = rgb[0];
-      colors[i * 3 + 1] = rgb[1];
-      colors[i * 3 + 2] = rgb[2];
-    }
-    geom.setAttribute('color', new BufferAttribute(colors, 3));
-    node.material = new MeshBasicMaterial({
-      color: 0xffffff,
-      vertexColors: true,
-    });
-  });
+  return base64ToArrayBuffer(b64);
 }
 
 async function loadOnce(id: CharacterId): Promise<Group> {
@@ -150,32 +37,7 @@ async function loadOnce(id: CharacterId): Promise<Group> {
     loader.parse(patched, '', resolve, reject);
   });
 
-  const textureKeys = [
-    'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap',
-    'emissiveMap', 'bumpMap', 'displacementMap', 'alphaMap',
-    'envMap', 'lightMap', 'specularMap',
-    'gradientMap', 'matcap',
-    'clearcoatMap', 'clearcoatRoughnessMap', 'clearcoatNormalMap',
-    'sheenColorMap', 'sheenRoughnessMap',
-    'transmissionMap', 'thicknessMap',
-    'iridescenceMap', 'iridescenceThicknessMap',
-    'anisotropyMap',
-  ];
-  gltf.scene.traverse((node: any) => {
-    if (node.isMesh) {
-      node.frustumCulled = false;
-      if (node.material) {
-        for (const key of textureKeys) {
-          if (node.material[key]) node.material[key] = null;
-        }
-        node.material.needsUpdate = true;
-      }
-      if (node.geometry) {
-        node.geometry.computeBoundingBox();
-        node.geometry.computeBoundingSphere();
-      }
-    }
-  });
+  prepareScene(gltf.scene);
 
   try {
     const palette = await getPaletteSampler(CHARACTER_TEX[id]);
