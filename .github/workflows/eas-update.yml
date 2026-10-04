@@ -1,0 +1,73 @@
+name: EAS Update (OTA)
+
+on:
+  push:
+    branches:
+      - 'Github-build-pipeline-zombie-crusher'
+    paths-ignore:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'app.json'
+      - 'eas.json'
+      - 'metro.config.js'
+      - 'babel.config.js'
+      - 'tsconfig.json'
+      - '.github/**'
+      - '**/*.md'
+      - 'agentic docs/**'
+      - 'scripts/**'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'EAS update channel/branch (preview | production)'
+        required: true
+        default: 'preview'
+      message:
+        description: 'Update message'
+        required: false
+        default: ''
+
+concurrency:
+  group: eas-update-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update:
+    name: Publish OTA update
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.ZOMBIE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.ZOMBIE }}
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Generate build info
+        run: node scripts/write-build-info.mjs
+
+      - name: Prepare icon assets
+        run: npm run prepare-assets
+
+      - name: Publish update
+        env:
+          EXPO_TOKEN: ${{ secrets.ZOMBIE }}
+        run: |
+          BRANCH="${{ github.event.inputs.branch || 'preview' }}"
+          MSG="${{ github.event.inputs.message }}"
+          if [ -z "$MSG" ]; then
+            MSG="$(git log -1 --pretty=%B | head -n1)"
+          fi
+          eas update --non-interactive --branch "$BRANCH" --message "$MSG"

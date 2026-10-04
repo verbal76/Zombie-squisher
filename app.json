@@ -1,42 +1,54 @@
 {
   "expo": {
-    "name": "Zombie Crusher",
-    "slug": "zombie-crusher",
-    "version": "0.1.0",
+    "name": "Zombie Squisher",
+    "slug": "zombie",
+    "owner": "hot-attic-games",
+    "version": "1.0.0",
     "orientation": "landscape",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#0d0805",
-    "newArchEnabled": true,
+    "scheme": "zombiesquisher",
+    "newArchEnabled": false,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0a"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/9b498cb4-2cf6-4604-8d25-3b2d6be0add7",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.verbal76.zombiesquisher"
+    },
     "android": {
-      "package": "com.hotatticgames.zombiecrusher",
-      "versionCode": 1,
+      "package": "com.verbal76.zombiesquisher",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon-foreground.png",
-        "backgroundColor": "#1e321e"
-      },
-      "predictiveBackGestureEnabled": false
+        "backgroundColor": "#0a0a0a"
+      }
+    },
+    "web": {
+      "bundler": "metro"
     },
     "plugins": [
-      [
-        "expo-splash-screen",
-        {
-          "backgroundColor": "#0d0805",
-          "image": "./assets/splash-blank.png",
-          "imageWidth": 200,
-          "resizeMode": "contain"
-        }
-      ],
+      "expo-updates",
       [
         "expo-build-properties",
         {
           "android": {
-            "compileSdkVersion": 36,
-            "targetSdkVersion": 36,
-            "minSdkVersion": 24
+            "kotlinVersion": "1.9.25"
           }
         }
-      ]
-    ]
+      ],
+      "./plugins/with-no-compress-glb.js"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "9b498cb4-2cf6-4604-8d25-3b2d6be0add7"
+      }
+    }
   }
 }

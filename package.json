@@ -1,25 +1,38 @@
 {
-  "name": "zombie-crusher",
-  "version": "0.1.0",
-  "private": true,
-  "main": "index.js",
+  "name": "zombie-squisher",
+  "version": "1.0.0",
+  "main": "index.ts",
   "scripts": {
+    "prepare-assets": "node scripts/make-icon.mjs",
+    "prestart": "npm run prepare-assets",
     "start": "expo start",
-    "android": "expo run:android",
-    "test": "node --no-warnings --test tests/*.test.js",
-    "doctor": "expo-doctor"
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "expo": "~57.0.26",
-    "expo-build-properties": "~57.0.22",
-    "expo-constants": "~57.0.20",
-    "expo-keep-awake": "~57.0.2",
-    "expo-screen-orientation": "~57.0.2",
-    "expo-splash-screen": "~57.0.9",
-    "expo-status-bar": "~57.0.1",
-    "expo-system-ui": "~57.0.4",
-    "react": "^19.2.3",
-    "react-native": "^0.86.3",
-    "react-native-safe-area-context": "~5.7.0"
-  }
+    "expo": "~52.0.0",
+    "expo-asset": "~11.0.5",
+    "expo-build-properties": "~0.13.1",
+    "expo-file-system": "~18.0.5",
+    "expo-font": "~13.0.4",
+    "expo-gl": "~15.0.5",
+    "expo-status-bar": "~2.0.0",
+    "expo-updates": "~0.26.0",
+    "expo-haptics": "~14.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.3",
+    "@react-native-async-storage/async-storage": "1.23.1",
+    "@react-three/fiber": "^8.17.10",
+    "three": "^0.166.0",
+    "upng-js": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "~18.3.12",
+    "@types/three": "^0.166.0",
+    "sharp": "^0.33.5",
+    "typescript": "^5.3.3"
+  },
+  "private": true
 }
