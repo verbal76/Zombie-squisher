@@ -65,3 +65,50 @@ test('sanitizeProgress repairs corrupt or outdated saves', () => {
   // selected vehicle that is not unlocked falls back instead of letting players drive for free
   assert.equal(sanitizeProgress({ selectedVehicle: 'tank', unlockedVehicles: ['hatchback'] }).selectedVehicle, 'hatchback');
 });
+
+import { spentKills, UPGRADE_COSTS } from '../src/store/progressLogic';
+
+test('lifetimeKills never decreases: buying vehicles/upgrades spends the bank but not unlock progress', () => {
+  let p = applyKills(fresh(), 1500);                 // bank 1500, lifetime 1500
+  assert.equal(p.lifetimeKills, 1500);
+  p = buyVehicle(p, 'sedan')!; p = buyUpgrade(p, 'sedan', 'speed')!; p = buyUpgrade(p, 'sedan', 'speed')!;
+  assert.equal(p.totalKills, 1500 - VEHICLES.sedan.killCost - UPGRADE_COSTS[0] - UPGRADE_COSTS[1]);
+  assert.equal(p.lifetimeKills, 1500, 'spending leaves lifetime untouched');
+  p = applyKills(p, 10);
+  assert.equal(p.lifetimeKills, 1510);
+});
+
+test('regression: spending the bank must not stop weapons unlocking (unlocks used the spendable balance)', () => {
+  const flame = WEAPONS.flame.unlockKills;
+  // earn just under the threshold, spend most of it, then earn a little more: lifetime now crosses the threshold
+  let p = applyKills(fresh(), flame - 50);
+  p = buyVehicle(p, 'sedan')!;                         // bank drops far below the threshold
+  assert.ok(p.totalKills < flame - 50);
+  assert.ok(!p.unlockedWeapons.includes('flame'));
+  p = applyKills(p, 60);                               // lifetime = flame + 10, bank is still tiny
+  assert.ok(p.totalKills < flame);
+  assert.ok(p.unlockedWeapons.includes('flame'), 'lifetime kills unlock the flamethrower');
+});
+
+test('migration from a pre-lifetimeKills save reconstructs lifetime exactly (bank + everything spent)', () => {
+  const old: any = { ...fresh(), totalKills: 777, unlockedVehicles: ['hatchback', 'sedan', 'coupe'], selectedVehicle: 'coupe' };
+  delete old.lifetimeKills;
+  old.upgrades = { ...old.upgrades, sedan: { speed: 3, armor: 0, handling: 1, acceleration: 0 }, coupe: { speed: 0, armor: 2, handling: 0, acceleration: 0 } };
+  const expectedSpent = VEHICLES.sedan.killCost + VEHICLES.coupe.killCost
+    + (UPGRADE_COSTS[0] + UPGRADE_COSTS[1] + UPGRADE_COSTS[2]) + UPGRADE_COSTS[0]      // sedan speed x3, handling x1
+    + (UPGRADE_COSTS[0] + UPGRADE_COSTS[1]);                                           // coupe armor x2
+  assert.equal(spentKills(old), expectedSpent);
+  const p = sanitizeProgress(old);
+  assert.equal(p.lifetimeKills, 777 + expectedSpent);
+  // idempotent and never below the bank
+  assert.equal(sanitizeProgress(p).lifetimeKills, p.lifetimeKills);
+  assert.equal(sanitizeProgress({ ...p, lifetimeKills: 5 }).lifetimeKills, 777 + expectedSpent);
+  assert.equal(sanitizeProgress({ ...p, lifetimeKills: 'x' }).lifetimeKills, 777 + expectedSpent);
+});
+
+test('existing players keep every unlock they had earned (migration does not re-lock content)', () => {
+  const old: any = { ...fresh(), totalKills: 40, unlockedWeapons: ['none', 'mg', 'flame'], selectedWeapon: 'flame' };
+  delete old.lifetimeKills;
+  const p = sanitizeProgress(old);
+  assert.ok(p.unlockedWeapons.includes('flame') && p.selectedWeapon === 'flame');
+});
