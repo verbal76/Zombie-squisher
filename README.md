@@ -2,13 +2,15 @@
 
 Top-down arcade-y driving game. Run swarms of zombies over with your bumper, mounted swords slice anything that brushes the doors, weapons (machine gun, flamethrower, rockets, plasma lance) auto-fire forward, and abilities (nitro, shield, EMP) sit on cooldowns. Squishing kills upgrades stats between runs and unlocks more weapons, side mods, abilities, and vehicles.
 
-Built with Expo SDK 52 + React Native 0.76 + TypeScript. Native Android APKs are built **on GitHub's free Ubuntu runner via `eas build --local`** — zero EAS build minutes. JS-only changes ship as OTA updates.
+Built with Expo SDK 54 + React Native 0.81 + React 19 + three.js (react-three-fiber) + TypeScript. Native Android APKs are built **on GitHub's free Ubuntu runner via `eas build --local`** — zero EAS build minutes. JS-only changes ship as OTA updates.
 
 ## Branches
 
 | Branch | Purpose |
 |---|---|
 | `Github-build-pipeline-zombie-crusher` | Primary working branch. Pushes here trigger OTA + APK builds. |
+| `ccr-*` / `candidate/*` | Working branches: CI + candidate APK only, never OTA or a release. |
+| `checkpoint/pre-resurrection-7004f7d` | Rollback point: the pipeline branch exactly as it was before the 2026-10 resurrection. |
 | `main` | Untouched / not used for active development. |
 
 ## Pipelines
@@ -58,16 +60,38 @@ Already wired into `app.json` (`expo.owner`, `expo.slug`, `expo.extra.eas.projec
 ## Project layout
 
 ```
-App.tsx                       # scene router + OTA bootstrap
+App.tsx                       # scene router, HAG splash gate, OTA bootstrap (OTA applies only from the menu)
 index.ts                      # Expo entry
 src/
-  components/                 # MenuScreen, GameScreen, GarageScreen, GameOverScreen
-  data/                       # vehicles, weapons, abilities, sideMods, zombies (pure data)
-  game/engine.ts              # game loop, physics, spawning, combat, blood trails
-  store/progress.ts           # AsyncStorage save/load + economy
-  types.ts
+  components/                 # HagSplash, MenuScreen, GameScreen, GarageScreen, GameOverScreen, AboutModal
+  data/                       # vehicles, weapons, abilities, sideMods, zombies (pure data), objects (GLB registry)
+  game/engine.ts              # game loop, physics, spawning, combat, blood trails (pure, unit tested)
+  store/progressLogic.ts      # economy + save sanitising (pure, unit tested)
+  store/progress.ts           # AsyncStorage save/load wrapper
+  render/                     # GLB loading (three.js GLTFLoader on Hermes)
+assets/brand/                 # app icon, adaptive icon, blank native splash, Hot Attic Games logo (derived from the master logo)
+tests/                        # engine, save, and project/release-identity tests (`npm test`)
+tools/                        # apk-name.js, verify-apk.sh, emulator-smoke.sh, make_brand_assets.py
 .github/workflows/
-  android-build.yml           # GitHub-runner local APK + tagged release
-  eas-update.yml              # OTA publisher
-app.json eas.json             # Expo + EAS configuration
+  ci.yml                      # typecheck + tests + bundle + prebuild on every branch/PR (no secrets)
+  build-apk.yml               # reusable: signed APK -> name -> verify (identity/signer/16 KB) -> emulator smoke test
+  android-candidate.yml       # runs build-apk.yml on ccr-** / candidate/** branches (no release, no OTA)
+  android-build.yml           # pipeline branch: build-apk.yml + GitHub Release; v* tags -> production AAB
+  eas-update.yml              # OTA publisher (pipeline branch only)
 ```
+
+## Releases, versions and naming
+
+- APKs are named `<GameName>-v<version>.apk`, e.g. `Zombie-Squisher-v1.1.0.apk` (`tools/apk-name.js`).
+- `app.json` `version` (also the OTA runtime version) and `android.versionCode` must both be bumped for every native build; `package.json` `version` must match `app.json` (enforced by `npm test`).
+- **Never change `version` without shipping an APK** (see `docs/pipeline-handoff.md`). 1.1.0 is the Expo SDK 54 native runtime; installs of 1.0.0 (SDK 52) never receive 1.1.0 OTAs.
+- APKs are signed by the project's EAS credentials. CI fails if the signer differs from the key that signed build #76, because that APK could not update an installed copy.
+- The About screen (gear icon) shows game/version/versionCode, commit, CI run, APK file name, OTA update id/runtime/channel and 3D render diagnostics.
+
+## Testing
+
+```sh
+npm run check          # typecheck + unit tests
+npm test               # tests only (node:test + tsx; no device needed)
+```
+CI additionally installs the built APK on an Android emulator and drives it (splash, menu, gameplay, About diagnostics, background/foreground). See `docs/HANDOFF.md`.
