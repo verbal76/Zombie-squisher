@@ -87,7 +87,7 @@ export function GameHud({ world: w, vehicle, ability, abilityEquipped, insets, d
   const hpColor = hpPct > 0.5 ? colors.ok : hpPct > 0.25 ? colors.hazard : colors.danger;
   return (
     <>
-      <View style={[styles.panel, { top: hudTop, left: insets.left + 12, right: insets.right + 108 }]} pointerEvents="none">
+      <View style={[styles.panel, { top: hudTop, left: insets.left + 12 }]} pointerEvents="none">
         <View style={styles.hudRow}>
           <Text style={styles.hudKills}>KILLS <Text style={styles.hudKillsNum}>{w.kills}</Text></Text>
           <Text style={styles.hudWave}>WAVE {w.wave + 1}</Text>
@@ -161,8 +161,8 @@ export function PauseOverlay({ settings, onSettings, onResume, onEndRun }: Pause
 }
 
 const styles = StyleSheet.create({
-  panel: { position: 'absolute', backgroundColor: colors.panel, borderRadius: 8, borderWidth: 1, borderColor: colors.edge, borderLeftWidth: 4, borderLeftColor: colors.hazard, paddingHorizontal: 10, paddingTop: 6, paddingBottom: 0, overflow: 'hidden' },
-  stripe: { marginTop: 6, marginHorizontal: -10 },
+  panel: { position: 'absolute', width: 300, backgroundColor: colors.panel, borderRadius: 8, borderWidth: 1, borderColor: colors.edge, borderLeftWidth: 4, borderLeftColor: colors.hazard, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 0, overflow: 'hidden' },
+  stripe: { marginTop: 5, marginHorizontal: -10 },
   hudRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   hudKills: { ...type.label, color: colors.dim, fontSize: 13 },
   hudKillsNum: { ...type.number, color: colors.text, fontSize: 24 },
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
   momentumWrap: { marginTop: 2, height: 6, backgroundColor: '#1a1a1a', borderRadius: 3, overflow: 'hidden', position: 'relative' },
   momentumFill: { height: '100%' },
   momentumTick: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: colors.hazard },
-  gaugeLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
+  gaugeLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 },
   gaugeLabel: { ...type.label, color: colors.dim, fontSize: 10 },
   gaugeReadout: { ...type.label, color: colors.text, fontSize: 10 },
   streakText: { ...type.title, color: colors.hazard, fontSize: 14, marginTop: 4, letterSpacing: 1 },

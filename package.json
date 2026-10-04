@@ -35,10 +35,14 @@
     "upng-js": "^2.1.0"
   },
   "devDependencies": {
+    "@expo/metro-runtime": "~6.1.2",
     "@types/react": "~19.1.10",
     "@types/three": "^0.166.0",
     "babel-preset-expo": "~54.0.12",
     "expo-system-ui": "~6.0.9",
+    "playwright-core": "^1.63.0",
+    "react-dom": "^19.1.0",
+    "react-native-web": "^0.21.3",
     "tsx": "^4.20.0",
     "typescript": "~5.9.2"
   },

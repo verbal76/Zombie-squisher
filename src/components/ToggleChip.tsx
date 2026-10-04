@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
+import { colors, type } from '../ui/theme';
 
 export function ToggleChip({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
   return (
@@ -16,9 +17,9 @@ export function ToggleChip({ label, on, onPress }: { label: string; on: boolean;
 }
 
 const styles = StyleSheet.create({
-  chip: { minHeight: 44, paddingHorizontal: 14, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  on: { backgroundColor: 'rgba(255,210,74,0.15)', borderColor: '#ffd24a' },
-  off: { backgroundColor: 'rgba(80,80,80,0.2)', borderColor: '#555' },
-  text: { color: '#ffd24a', fontWeight: '800', letterSpacing: 1, fontSize: 12 },
-  textOff: { color: '#888' },
+  chip: { minHeight: 48, paddingHorizontal: 10, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  on: { backgroundColor: 'rgba(255,196,0,0.12)', borderColor: colors.hazard },
+  off: { backgroundColor: 'rgba(80,80,80,0.2)', borderColor: colors.faint },
+  text: { ...type.label, color: colors.hazard, fontSize: 12 },
+  textOff: { color: colors.dim },
 });

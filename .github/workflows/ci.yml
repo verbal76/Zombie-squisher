@@ -34,3 +34,26 @@ jobs:
       - name: Dependency compatibility (expo-doctor)
         run: npx expo-doctor
         continue-on-error: true
+
+  ui-preview:
+    # Renders every pure-UI screen in a browser (react-native-web) at several landscape sizes and safe-area
+    # insets, and fails on page errors, controls that leave the screen, or touch targets under 44 px.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build UI gallery (web)
+        run: EXPO_PUBLIC_UI_GALLERY=1 CI=1 npx expo export --platform web --output-dir "$RUNNER_TEMP/gallery"
+      - name: Screenshots + layout assertions
+        run: CHROME_PATH=/usr/bin/google-chrome node tools/ui-shots.mjs "$RUNNER_TEMP/gallery" ui-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-shots
+          path: ui-shots/
+          retention-days: 7
