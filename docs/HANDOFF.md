@@ -1,59 +1,63 @@
-# Handoff — Zombie Squisher resurrection (2026-10)
+# Handoff — Zombie Squisher resurrection (Oct 2026)
 
-## What this repository really is
-- **Game:** Zombie Squisher (app label "Zombie Squisher"; the repo README on `main` calls it "Zombie Crusher", the one rename that never reached the app).
-- **Authoritative line:** `Github-build-pipeline-zombie-crusher` (159 commits, 2026-05-09 → 05-13). `main` only holds docs + the prune workflow + the company logo.
-- **Rollback checkpoint:** branch `checkpoint/pre-resurrection-7004f7d` = `7004f7d46b26`, the last commit of the line before this work. APK build #76 (release `apk-build-76`) was built from it.
-- An earlier attempt in this same effort rebuilt the game from scratch because the other branches and the 32 GitHub releases were missed. That work is preserved at `archive/scratch-rewrite-97a5729` and is **not** used.
+Living document. The final owner handoff (APK name, hash, CI run) is appended when a candidate passes CI.
 
-## Archaeology
-| Branch | State |
-|---|---|
-| `Github-build-pipeline-zombie-crusher` | 3D game (three.js + R3F + Kenney GLBs), 10 vehicles, weapons, side mods, abilities, streaks, bosses, garage/economy, OTA + EAS-signed APK pipeline. **Used.** |
-| `claude/fix-bounding-box-controls-7LQLQ` | ancestor (108 commits, bicycle-model steering). Superseded by the line above. |
-| `claude/fix-build-artifacts-visibility-rwXqU` | ancestor (33 commits, 2D→3D experiments). Superseded. |
-| `claude/github-game-builds-AAswD` | initial scaffold + EAS wiring. Superseded. |
-| releases `apk-build-*` (32) | all tagged on `1707a6a` (main) although built from the pipeline branch, so tags do not identify sources. New releases use the same scheme; the asset now carries the real SHA in the About screen. |
+## Identity and baseline
+- **Game:** Zombie Squisher (app label). `main`'s README says "Zombie Crusher", a rename that never reached the app.
+- **Authoritative line:** `Github-build-pipeline-zombie-crusher` @ `7004f7d46b26` (159 commits, 2026-05-09..13).
+- **Rollback checkpoint:** branch `checkpoint/pre-resurrection-7004f7d` (== `7004f7d`). `archive/scratch-rewrite-97a5729` holds an abandoned from-scratch rewrite made before the real line was found; it is not used.
+- **Original APK (forensic baseline):** GitHub release `apk-build-76`, `zombie-squisher.apk`, SHA-256 `3911ac6dc3b90167286b7c6720f2437d526ff50db5e123814cb70d5249fa7b68`, 80.6 MB.
+  - `com.verbal76.zombiesquisher`, versionName 1.0.0, **versionCode 1**, minSdk 24, **targetSdk 34**, compileSdk 35, Expo SDK 52 / RN 0.76 / Hermes bc v96, old architecture.
+  - Built from `7004f7d`: the full SHA is embedded in its bundle; every UI string, constant and the spawn code match the source; no app-specific string exists that the source lacks.
+  - v2-signed only, one self-signed EAS key, SHA-256 `178015BD…BF0DA4EC` (CI refuses any APK signed otherwise).
+  - 14 native libs x 4 ABIs; **13/14 were 4 KB-aligned (fails 16 KB)**. Default Expo launcher icon (icon source PNG in repo was truncated), splash with no logo, overlay + storage permissions it never used, **0 audio files, 0 fonts**.
+  - OTA: expo-updates, runtime `1.0.0`, channel `preview`, project `9b498cb4-…`. 121 OTA publishes and 76 APK builds happened on the line.
 
-Baseline measured from APK #76 (downloaded, SHA-256 `3911ac6d…7fa7b68`): package `com.verbal76.zombiesquisher`, versionName 1.0.0, **versionCode 1**, minSdk 24, **targetSdk 34**, v2-signed by the EAS key (SHA-256 `178015BD…BF0DA4EC`), 4 ABIs, 13 of 14 native libs 4 KB-aligned (**fails 16 KB**), no real app icon (icon source PNG in the repo was truncated; `app.json` did not reference one), storage + overlay permissions requested needlessly, 191 MB uncompressed.
+## Archaeology (all branches, tags, releases, PRs, history)
+- 4 other branches: `claude/*` ones are older snapshots of the same driving work (only unique content: a 2D renderer and faux-3D cubes in `fix-build-artifacts-visibility`), `github-game-builds-AAswD` is the original scaffold. Nothing in them is worth recovering.
+- 32 releases `apk-build-17..76`, all lightweight tags on `1707a6a` although built from the pipeline branch; APK binaries exist only as release assets.
+- Deleted-file history: the 17 base64 character modules (3.4 MB) and 3 helper scripts were superseded by real GLBs. No audio, fonts or sprites ever existed in any commit.
+- No TODO/FIXME, no secrets (203 commits scanned), no dangling work. Dead code found: `Thumbstick.tsx`, `ZombieCharacter.tsx` (replaced), ~100 never-referenced GLB requires that still bloated the APK, a corrupt `grass.png`.
 
-## Rebuild decision: **subsystem reconstruction** (not a rewrite)
-Kept: game design, engine, data, renderer approach, assets, EAS/OTA pipeline, package identity, signing key.
-Rebuilt/changed:
-- Expo SDK 52 → **54** (RN 0.81, React 19, R3F 9, expo-file-system legacy API, NDK 27 → 16 KB aligned, target/compile SDK 36). Old architecture kept deliberately (`newArchEnabled:false`) to avoid changing the 3D stack's behaviour without a device in the loop; SDK 55 will force the move.
-- `version` 1.0.0 → **1.1.0** and `versionCode` 1 → **2** (local version source). OTA runtime policy is `appVersion`, so 1.0.0 installs never receive 1.1.0 JavaScript.
-- Splash/icon/brand pipeline (see below), lockfile committed, CI rebuilt, tests added.
+## Decision: subsystem reconstruction (option B)
+Kept: design, engine, data, assets, EAS/OTA pipeline, package id, signing key. Rebuilt or replaced: Expo SDK 52 → **54** (16 KB, API 36), zombie rendering, input layer, HUD/menu/garage/game-over UI, audio (new), icon/splash, build and test infrastructure, save/economy logic.
 
-## Defects found and fixed
-| Defect | Fix | Guard |
-|---|---|---|
-| 5 TypeScript errors at baseline (incl. `deriveStats` spread letting `undefined` upgrade fields turn stats into `NaN`) | explicit defaults | `npm run typecheck`, engine test |
-| EMP kills never counted (no kill, streak, blood) | `registerKill` in the EMP loop | engine test |
-| Side-mod damage, bumper damage and per-hit slowdown were per frame (frame-rate dependent) | scaled by elapsed frames | engine test (60 vs 20 fps) |
-| Debug text (hd/vF/L/R/z/pr) always on the player HUD | `__DEV__` only | — |
-| No pause; backgrounding left the loop running | pause button, auto-pause on background, About pauses | emulator smoke test |
-| OTA was applied with `reloadAsync()` at any time, even mid-run | OTA downloads in background, applies only from the menu | — |
-| Main menu required scrolling in landscape to reach DRIVE | two-column landscape layout | — |
-| HUD/controls ignored safe areas (edge-to-edge is mandatory at target 36) | `react-native-safe-area-context` insets everywhere in game + menu | — |
-| `createWorld` allocated on every HUD tick; game loop restarted on game over; end-of-run timer not cleared | lazy ref, refs for callbacks, cleanup | — |
-| Icon source PNG truncated/corrupt, build script silently skipped it | committed `assets/brand/*`, build fails on bad assets | `tests/project.test.ts` |
-| Unneeded permissions (overlay, storage) | `blockedPermissions` | `tools/verify-apk.sh`, test |
-| Release APKs always versionCode 1, name `zombie-squisher.apk` | versionCode 2; `Zombie-Squisher-v1.1.0.apk` | tests + CI |
-| Save loader trusted persisted JSON | `sanitizeProgress` repairs corrupt / outdated saves | `tests/progress.test.ts` |
+## Architecture (current)
+`engine.ts` (rules, pure) → `GameScreen` (loop, pause, lifecycle, audio) → `GameScene` (R3F 3D: chase camera, car GLB, `ZombieHorde` + `BloodSplats` instanced) + `GameHud` + `ControlPad`. `controls.ts`, `audioDirector.ts`, `progressLogic.ts` are pure and unit tested. Zombie meshes are baked at build time (`tools/bake-characters.ts` → `src/assets/baked/zombieModels.json`; a test fails if stale). Expo SDK 54, RN 0.81, React 19, R3F 9, three r166, old architecture (SDK 55 forces new arch: next migration).
 
-## Splash screen
-Android 12+ system splash = background colour `#0d0805` with a **transparent** icon (`assets/brand/splash-blank.png`), then the in-app `HagSplash` (fade in 350 ms, hold 1.1 s, fade out 300 ms) shows the authoritative logo (`Hot_Attic_Games_Master_Logo_ALPHA_FINAL.png`, cropped/resized by `tools/make_brand_assets.py`, never redrawn) → menu. The native splash is released on the logo's first layout, so there is one visible logo and no double splash. The save game loads in parallel, so the splash adds no avoidable delay beyond the 1.75 s brand moment.
+## Defects found and dispositions
+| # | Defect | Fix | Guard |
+|---|---|---|---|
+| 1 | 5 baseline TS errors; `deriveStats` spread let `undefined` upgrade fields produce NaN stats | explicit defaults | typecheck + test |
+| 2 | EMP kills never counted (no kill/streak/blood) | `registerKill` | test |
+| 3 | Damage/slowdown applied per frame (frame-rate dependent) | scaled by elapsed frames | test 60 vs 20 fps |
+| 4 | **Economy:** unlocks measured against the *spendable* bank; spending kills could lock you out of the Flamethrower etc. | `lifetimeKills`, exact migration of existing saves | 4 tests |
+| 5 | ~3000 draw calls and 500 React components at the zombie cap | instanced horde (18 draw calls) | tests |
+| 6 | 18 x 1024² PNG decodes + GLB parses in JS, lazily, while driving | build-time bake (40 KB JSON) | stale-bake test |
+| 7 | Unbounded blood decals | cap 300 | test |
+| 8 | Debug text always on HUD; no pause; backgrounding left the game running; OTA could reload mid-run | `__DEV__` only, pause + auto-pause, OTA applies from menu only | smoke test |
+| 9 | HUD/controls ignored safe areas (edge-to-edge is mandatory at API 36) | insets everywhere | layout tests + UI preview |
+| 10 | Overlapping touch hit areas resolved by array order; one lifted finger cancelled a hold two fingers kept | nearest-edge hit test, ref-counted holds | 11 input tests |
+| 11 | `GameScreen` 800 lines mixing scene/HUD/input; duplicated GLB loader code | split; shared `glbCommon` | — |
+| 12 | Menu needed scrolling in landscape; overflowed 640 px phones (found by layout assertions) | scaling two-column layout | `ui-shots` assertions in CI |
+| 13 | No icon, no splash logo, unneeded permissions | new icon (adaptive + monochrome), HAG splash, blocked permissions (incl. mic/foreground-service injected by expo-audio) | tests + `verify-apk.sh` |
+| 14 | Boss HP bar promised in README, never rendered; no damage feedback | boss bar, damage flash | preview |
+| 15 | Silent game (design doc: "good audio makes cheap visuals feel expensive") | 15 synthesised sounds + music, tested director | 12 audio tests |
+| 16 | **CI:** `android-actions/setup-android@v3` now fails on current runners (old pipeline's APK lane is broken today); Gradle `OutOfMemoryError: Metaspace` in KSP then deadlocked the daemon for 74 min | preinstalled SDK; Gradle memory plugin; 40 min step timeout | CI asserts |
+
+## Startup sequence
+Android 12+ system splash = background `#0d0805` with a transparent icon → in-app Hot Attic Games logo (350 ms in, 1.1 s hold, 300 ms out; asset cropped/resized from `Hot_Attic_Games_Master_Logo_ALPHA_FINAL.png`, never redrawn) → menu. Native splash is released on the logo's first layout (same colour: seamless). Save + settings load in parallel.
 
 ## Release engineering
-- `tools/apk-name.js` is the only place that names artifacts. `tools/verify-apk.sh` verifies identity, targetSdk ≥ 35, forbidden permissions, v2/v3 signature, **signer = the key of build #76**, `zipalign -P 16`, ELF LOAD alignment ≥ 16 KB for arm64-v8a and x86_64.
-- `tools/emulator-smoke.sh` runs on an API 34 emulator in CI: install, cold start, sample the splash frames, tap DRIVE, hold steer, read About diagnostics (3D models loaded / frames / load + render errors), logcat crash scan, background/foreground and auto-pause check.
-- OTA: nothing in this work publishes an OTA. `eas-update.yml` only fires on the pipeline branch; merging this work there will publish a `src/**` OTA to runtime 1.1.0 (reaches only 1.1.0 installs) and trigger the APK lane for config changes.
-- CI uses `secrets.ZOMBIE` (the existing EAS token) on `ccr-**`/`candidate/**` pushes so candidates are signed with the real key and can update an installed 1.0.0 build in place (progress is kept). They create no release and no OTA.
+- `tools/apk-name.js` names artifacts `<Game>-v<version>.apk`; `tools/verify-apk.sh` checks identity, targetSdk ≥ 35, forbidden permissions, v2/v3 signature, **signer == build #76 key**, `zipalign -P 16`, ELF LOAD alignment ≥ 16 KB (arm64-v8a, x86_64); `tools/emulator-smoke.sh` installs and drives the APK on an API 34 emulator (splash frames, DRIVE, steering, About diagnostics: models loaded/frames/errors, logcat crash scan, background/foreground + auto-pause).
+- Version identity: `version` 1.1.0 (= OTA runtime) / `versionCode` 2 (build #76 shipped 1). Never change `version` without shipping an APK.
+- **OTA:** nothing in this work publishes an OTA. `eas-update.yml` fires only on the pipeline branch. Merging this PR there publishes a `src/**` OTA to runtime 1.1.0 (reaches only 1.1.0 installs, i.e. never the old 1.0.0 APK) and triggers the APK lane for config changes. That is the owner's decision.
+- CI uses `secrets.ZOMBIE` on `ccr-**`/`candidate/**` pushes so candidates are signed with the real key and update an installed 1.0.0 in place (progress kept). No release, no OTA from those runs.
+
+## Data for the owner (design judgement, not changed)
+- Spawn rate is "100x" by earlier request: the 500-zombie cap is reached ~7 s in for every vehicle (`tools/simulate.ts`). Simple bots die in 35–130 s in the hatchback (idle 36 s, circling 134 s, tank driving straight survives 240 s+).
+- Starter hatchback survives 25 walker bumper hits (brute 9, boss 4); the design doc says "roughly 10".
+- Game name: README on `main` says "Zombie Crusher"; APKs follow the app name "Zombie Squisher".
 
 ## Known remaining issues
-See `agentic docs/KNOWN_ISSUES.md`. Most important: real-device performance with up to 500 zombies is unverified (emulator only); placeholder icon; no audio; Garage / Game Over landscape layout.
-
-## Owner decisions needed
-1. Spawn rate is "100x" by earlier request and the 500-zombie cap is hit within seconds; DESIGN_TRUTHS asks for escalation. Keep, or ramp it?
-2. Game name: README on `main` says "Zombie Crusher", the app says "Zombie Squisher". APKs follow the app name.
-3. Real app icon art.
+See `agentic docs/KNOWN_ISSUES.md`. Not verifiable without a device: real-device frame rate at max density, audio mix/loudness on phone speakers, touch feel. Music and SFX are synthesised and functional but would benefit from a human audio pass. App icon is original procedural artwork; real art would be better.

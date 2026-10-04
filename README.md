@@ -60,20 +60,28 @@ Already wired into `app.json` (`expo.owner`, `expo.slug`, `expo.extra.eas.projec
 ## Project layout
 
 ```
-App.tsx                       # scene router, HAG splash gate, OTA bootstrap (OTA applies only from the menu)
-index.ts                      # Expo entry
+App.tsx                       # scene router, HAG splash gate, settings, OTA bootstrap (OTA applies only from the menu)
+index.ts                      # Expo entry (loads the dev-only UI gallery when EXPO_PUBLIC_UI_GALLERY=1)
 src/
-  components/                 # HagSplash, MenuScreen, GameScreen, GarageScreen, GameOverScreen, AboutModal
-  data/                       # vehicles, weapons, abilities, sideMods, zombies (pure data), objects (GLB registry)
-  game/engine.ts              # game loop, physics, spawning, combat, blood trails (pure, unit tested)
-  store/progressLogic.ts      # economy + save sanitising (pure, unit tested)
-  store/progress.ts           # AsyncStorage save/load wrapper
-  render/                     # GLB loading (three.js GLTFLoader on Hermes)
-assets/brand/                 # app icon, adaptive icon, blank native splash, Hot Attic Games logo (derived from the master logo)
-tests/                        # engine, save, and project/release-identity tests (`npm test`)
-tools/                        # apk-name.js, verify-apk.sh, emulator-smoke.sh, make_brand_assets.py
+  game/engine.ts              # rules: driving, spawning, combat, streaks, bosses (pure, unit + soak tested)
+  game/controls.ts            # touch layout, hit testing, multi-touch tracker (pure, tested)
+  components/                 # GameScreen (loop/pause/audio coordinator), GameScene (3D), GameHud, ControlPad,
+                              # ZombieHorde + BloodSplats (instanced), Menu, Garage, GameOver, HagSplash, About
+  audio/                      # AudioDirector (pure, tested), expo-audio backend, sound catalogue
+  render/                     # GLB helpers, zombie model builder (from the baked JSON), vehicle loader, grass
+  store/                      # progressLogic (economy + save sanitising, pure), settingsLogic, AsyncStorage wrappers
+  data/                       # vehicles, weapons, abilities, side mods, zombies; objects.ts = only bundled GLBs
+  ui/                         # scrapyard theme, Button, Plate, HazardStripe
+  dev/UiGallery.tsx           # browser UI preview harness (never in the app bundle)
+  assets/baked/               # zombieModels.json - build-time bake of the 18 Kenney characters
+assets/brand/                 # app icon (adaptive + monochrome), blank native splash, Hot Attic Games logo
+assets/audio/                 # synthesised sound effects + music loop (tools/synth_audio.py)
+assets-source/characters/     # Kenney character GLBs + palettes (inputs to tools/bake-characters.ts, not bundled)
+plugins/                      # config plugins: GLB no-compress, Gradle memory
+tests/                        # engine, soak, economy/save, input, audio, render/assets, release identity
+tools/                        # apk-name.js, verify-apk.sh, emulator-smoke.sh, ui-shots.mjs, simulate.ts, bakes, synth
 .github/workflows/
-  ci.yml                      # typecheck + tests + bundle + prebuild on every branch/PR (no secrets)
+  ci.yml                      # typecheck + tests + bundle + prebuild + UI preview, every branch/PR (no secrets)
   build-apk.yml               # reusable: signed APK -> name -> verify (identity/signer/16 KB) -> emulator smoke test
   android-candidate.yml       # runs build-apk.yml on ccr-** / candidate/** branches (no release, no OTA)
   android-build.yml           # pipeline branch: build-apk.yml + GitHub Release; v* tags -> production AAB
@@ -91,7 +99,9 @@ tools/                        # apk-name.js, verify-apk.sh, emulator-smoke.sh, m
 ## Testing
 
 ```sh
-npm run check          # typecheck + unit tests
-npm test               # tests only (node:test + tsx; no device needed)
+npm run check                       # typecheck + all unit/soak/asset tests (no device)
+node --import tsx tools/simulate.ts # headless balance probe: bots play the real engine
+EXPO_PUBLIC_UI_GALLERY=1 npx expo export --platform web --output-dir /tmp/g && node tools/ui-shots.mjs /tmp/g shots
 ```
+
 CI additionally installs the built APK on an Android emulator and drives it (splash, menu, gameplay, About diagnostics, background/foreground). See `docs/HANDOFF.md`.
