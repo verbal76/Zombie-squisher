@@ -8,7 +8,7 @@
 // units to game-world units. CarMesh uses `vehicle.width` as the X scale basis.
 
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { BufferAttribute, Group, MeshBasicMaterial, Object3D } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { COLORMAP_TEX } from '../data/objects';

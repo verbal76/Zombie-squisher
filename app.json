@@ -3,17 +3,13 @@
     "name": "Zombie Squisher",
     "slug": "zombie",
     "owner": "hot-attic-games",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "landscape",
     "userInterfaceStyle": "dark",
     "scheme": "zombiesquisher",
     "newArchEnabled": false,
     "runtimeVersion": {
       "policy": "appVersion"
-    },
-    "splash": {
-      "resizeMode": "contain",
-      "backgroundColor": "#0a0a0a"
     },
     "updates": {
       "url": "https://u.expo.dev/9b498cb4-2cf6-4604-8d25-3b2d6be0add7",
@@ -27,8 +23,16 @@
     "android": {
       "package": "com.verbal76.zombiesquisher",
       "adaptiveIcon": {
-        "backgroundColor": "#0a0a0a"
-      }
+        "foregroundImage": "./assets/brand/adaptive-icon-foreground.png",
+        "backgroundColor": "#1e321e"
+      },
+      "versionCode": 2,
+      "predictiveBackGestureEnabled": false,
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "bundler": "metro"
@@ -36,10 +40,26 @@
     "plugins": [
       "expo-updates",
       [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0d0805",
+          "image": "./assets/brand/splash-blank.png",
+          "imageWidth": 200,
+          "resizeMode": "contain"
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {
-            "kotlinVersion": "1.9.25"
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "minSdkVersion": 24,
+            "buildArchs": [
+              "arm64-v8a",
+              "armeabi-v7a",
+              "x86_64"
+            ]
           }
         }
       ],
@@ -49,6 +69,8 @@
       "eas": {
         "projectId": "9b498cb4-2cf6-4604-8d25-3b2d6be0add7"
       }
-    }
+    },
+    "icon": "./assets/brand/icon.png",
+    "backgroundColor": "#0d0805"
   }
 }

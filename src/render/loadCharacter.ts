@@ -5,7 +5,7 @@
 // flat-layout assets/ directory.
 
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { BufferAttribute, Group, MeshBasicMaterial, Object3D } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CHARACTER_GLB, CHARACTER_TEX, CharacterId } from '../assets/characters';

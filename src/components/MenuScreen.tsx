@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Progress } from '../types';
 import { VEHICLES } from '../data/vehicles';
 import { WEAPONS, ABILITIES } from '../data/weapons';
@@ -14,6 +15,9 @@ interface Props {
 
 export function MenuScreen({ progress, onPlay, onGarage }: Props) {
   const [aboutOpen, setAboutOpen] = useState(false);
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const landscape = width > height;
   const v = VEHICLES[progress.selectedVehicle];
   const w = WEAPONS[progress.selectedWeapon];
   const a = ABILITIES[progress.selectedAbility];
@@ -22,7 +26,7 @@ export function MenuScreen({ progress, onPlay, onGarage }: Props) {
     <View style={styles.root}>
       {/* Gear stays absolute-positioned outside the scroll area so it's
           always reachable regardless of scroll position. */}
-      <Pressable style={styles.gear} onPress={() => setAboutOpen(true)} hitSlop={12}>
+      <Pressable style={[styles.gear, { top: insets.top + 12, right: insets.right + 16 }]} onPress={() => setAboutOpen(true)} hitSlop={12} accessibilityLabel="About">
         <Text style={styles.gearIcon}>⚙</Text>
       </Pressable>
 
@@ -31,9 +35,15 @@ export function MenuScreen({ progress, onPlay, onGarage }: Props) {
           in landscape the content overflows ~170px and the player needs
           to scroll down to reach DRIVE / GARAGE. */}
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16, paddingLeft: insets.left + 24, paddingRight: insets.right + 24 },
+        ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Landscape (the game's orientation): two columns so DRIVE is always on screen. */}
+        <View style={landscape ? styles.rowLayout : styles.colLayout}>
+        <View style={styles.colBlock}>
         <Text style={styles.title}>ZOMBIE</Text>
         <Text style={styles.titleAlt}>SQUISHER</Text>
         <Text style={styles.subtitle}>Drive. Squish. Upgrade.</Text>
@@ -42,7 +52,9 @@ export function MenuScreen({ progress, onPlay, onGarage }: Props) {
           <Stat label="Total Kills" value={progress.totalKills.toLocaleString()} />
           <Stat label="Best Run" value={progress.bestRunKills.toLocaleString()} />
         </View>
+        </View>
 
+        <View style={styles.colBlock}>
         <View style={styles.loadout}>
           <Text style={styles.loadoutTitle}>LOADOUT</Text>
           <Text style={styles.loadoutLine}>Vehicle: <Text style={styles.loadoutVal}>{v.name}</Text></Text>
@@ -57,6 +69,8 @@ export function MenuScreen({ progress, onPlay, onGarage }: Props) {
         <Pressable style={styles.garageBtn} onPress={onGarage}>
           <Text style={styles.garageText}>GARAGE</Text>
         </Pressable>
+        </View>
+        </View>
       </ScrollView>
 
       <AboutModal visible={aboutOpen} onClose={() => setAboutOpen(false)} />
@@ -78,17 +92,20 @@ const styles = StyleSheet.create({
   // flexGrow: 1 + justifyContent center keeps the layout vertically
   // centered when the content fits the viewport, but allows the
   // ScrollView to scroll when it doesn't (e.g., landscape).
-  scrollContent: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 48, paddingBottom: 32, alignItems: 'center', justifyContent: 'center' },
+  scrollContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
+  rowLayout: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 40 },
+  colLayout: { alignItems: 'center' },
+  colBlock: { alignItems: 'center' },
   gear: { position: 'absolute', top: 24, right: 20, width: 40, height: 40, borderRadius: 20, backgroundColor: '#1a1a1a', borderWidth: 2, borderColor: '#2a2a2a', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   gearIcon: { color: '#ffd24a', fontSize: 22, lineHeight: 26 },
   title: { color: '#e34a4a', fontWeight: '900', fontSize: 56, letterSpacing: 4 },
   titleAlt: { color: '#ffd24a', fontWeight: '900', fontSize: 48, letterSpacing: 6, marginTop: -8 },
-  subtitle: { color: '#888', marginTop: 6, marginBottom: 24, fontStyle: 'italic' },
+  subtitle: { color: '#888', marginTop: 6, marginBottom: 16, fontStyle: 'italic' },
   statBox: { flexDirection: 'row', gap: 24, marginBottom: 20 },
   stat: { alignItems: 'center', minWidth: 120 },
   statValue: { color: '#fff', fontSize: 28, fontWeight: '900' },
   statLabel: { color: '#888', fontSize: 12, letterSpacing: 1 },
-  loadout: { backgroundColor: '#1a1a1a', padding: 16, borderRadius: 12, width: '100%', maxWidth: 460, marginBottom: 24, borderWidth: 1, borderColor: '#2a2a2a' },
+  loadout: { backgroundColor: '#1a1a1a', padding: 16, borderRadius: 12, width: '100%', maxWidth: 460, marginBottom: 16, borderWidth: 1, borderColor: '#2a2a2a' },
   loadoutTitle: { color: '#888', fontSize: 12, letterSpacing: 2, marginBottom: 8 },
   loadoutLine: { color: '#aaa', marginVertical: 2 },
   loadoutVal: { color: '#fff', fontWeight: '700' },

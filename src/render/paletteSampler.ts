@@ -20,7 +20,7 @@
 // top-left, so low u + low v should sample the top-left swatch directly.
 
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 // @ts-ignore upng-js has no @types, treat as any.
 import UPNG from 'upng-js';
 
