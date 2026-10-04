@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, GestureResponderEvent, Platform, Pressable, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Animated, AppState, GestureResponderEvent, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Canvas, useFrame } from '@react-three/fiber/native';
 import { Box3, Object3D, Vector3 } from 'three';
 import { Progress, Vehicle, Projectile, BloodSpot } from '../types';
@@ -23,7 +24,8 @@ const ARENA_H = 1200;
 const CAR_DEPTH = 18;
 const CAR_LIFT = 1;
 
-const HUD_TOP = (Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 44) + 8;
+// Developer-only readouts (engine/input/zombie counts) are never shown to players.
+const SHOW_DEBUG = __DEV__;
 
 const CHASE_DISTANCE   = 140;
 const CHASE_HEIGHT     = 85;
@@ -97,7 +99,29 @@ const HORIZON_BUILDINGS: HorizonBuilding[] = (() => {
 })();
 
 export function GameScreen({ progress, onEnd }: Props) {
-  const worldRef = useRef<World>(createWorld(ARENA_W, ARENA_H, progress));
+  const worldRef = useRef<World | null>(null);
+  if (worldRef.current === null) worldRef.current = createWorld(ARENA_W, ARENA_H, progress);
+  const insets = useSafeAreaInsets();
+  const pausedRef = useRef(false);
+  const [paused, setPausedState] = useState(false);
+  const endedRef = useRef(false);
+  const onEndRef = useRef(onEnd);
+  onEndRef.current = onEnd;
+  const progressRef = useRef(progress);
+  progressRef.current = progress;
+  const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setPaused = (p: boolean) => {
+    pausedRef.current = p;
+    if (p) {
+      // Release held inputs so nothing is stuck on when the game resumes.
+      steerLeftRef.current = false;
+      steerRightRef.current = false;
+      turboRef.current = false;
+      setTurboVisual(false);
+      touchesRef.current.clear();
+    }
+    setPausedState(p);
+  };
   const steerLeftRef  = useRef(false);
   const steerRightRef = useRef(false);
   const gearRef       = useRef<GearState>('forward');
@@ -108,26 +132,29 @@ export function GameScreen({ progress, onEnd }: Props) {
   const [turboVisual, setTurboVisual] = useState(false);
   const [autoFireVisual, setAutoFireVisual] = useState(true);
   const [, setTick] = useState(0);
-  const [exited, setExited] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
 
   const vehicle = VEHICLES[progress.selectedVehicle];
   const ability = ABILITIES[progress.selectedAbility];
 
   const { width: sw, height: sh } = useWindowDimensions();
+  const hudTop = insets.top + 8;
+  const bottomInset = insets.bottom;
+  const leftInset = insets.left;
+  const rightInset = insets.right;
 
   // Bottom row Y (arrows + F + R all share this row's center).
-  const rowCenterY = sh - BUTTON_ROW_BOTTOM - ARROW_BTN_SIZE / 2;
+  const rowCenterY = sh - bottomInset - BUTTON_ROW_BOTTOM - ARROW_BTN_SIZE / 2;
   const arrowY = rowCenterY - ARROW_BTN_SIZE / 2;
   const midY   = rowCenterY - MID_BTN_SIZE / 2;
 
   // Bottom-left cluster.
-  const leftArrowX = EDGE_MARGIN;
-  const fwdBtnX    = EDGE_MARGIN + ARROW_BTN_SIZE + INTRA_CLUSTER_GAP;
+  const leftArrowX = leftInset + EDGE_MARGIN;
+  const fwdBtnX    = leftArrowX + ARROW_BTN_SIZE + INTRA_CLUSTER_GAP;
 
   // Bottom-right cluster.
-  const rightArrowX = sw - EDGE_MARGIN - ARROW_BTN_SIZE;
-  const revBtnX     = sw - EDGE_MARGIN - ARROW_BTN_SIZE - INTRA_CLUSTER_GAP - MID_BTN_SIZE;
+  const rightArrowX = sw - rightInset - EDGE_MARGIN - ARROW_BTN_SIZE;
+  const revBtnX     = rightArrowX - INTRA_CLUSTER_GAP - MID_BTN_SIZE;
 
   // TURBO: above the right arrow, horizontally centered to it.
   const turboX = rightArrowX + (ARROW_BTN_SIZE - MID_BTN_SIZE) / 2;
@@ -157,32 +184,44 @@ export function GameScreen({ progress, onEnd }: Props) {
     const loop = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      const w = worldRef.current;
-      step(w, dt, {
-        steerLeft:  steerLeftRef.current,
-        steerRight: steerRightRef.current,
-        gear:       gearRef.current,
-        turbo:      turboRef.current,
-        fire:       autoFireRef.current,
-        triggerAbility: abilityTriggerRef.current,
-      }, progress);
-      abilityTriggerRef.current = false;
+      const w = worldRef.current!;
+      if (!pausedRef.current) {
+        step(w, dt, {
+          steerLeft:  steerLeftRef.current,
+          steerRight: steerRightRef.current,
+          gear:       gearRef.current,
+          turbo:      turboRef.current,
+          fire:       autoFireRef.current,
+          triggerAbility: abilityTriggerRef.current,
+        }, progressRef.current);
+        abilityTriggerRef.current = false;
+      }
       if (now - lastHudTick >= HUD_TICK_MS) {
         lastHudTick = now;
         setTick((t) => (t + 1) % 1000000);
       }
-      if (w.gameOver && !exited) {
-        setExited(true);
-        setTimeout(() => onEnd(w.kills), 800);
-        return;
+      if (w.gameOver && !endedRef.current) {
+        endedRef.current = true;
+        endTimer.current = setTimeout(() => onEndRef.current(w.kills), 800);
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [progress, exited, onEnd]);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (endTimer.current) clearTimeout(endTimer.current);
+    };
+  }, []);
 
-  const w = worldRef.current;
+  // Auto-pause whenever the app leaves the foreground.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') setPaused(true);
+    });
+    return () => sub.remove();
+  }, []);
+
+  const w = worldRef.current!;
   const hpPct = Math.max(0, w.hp / Math.max(1, w.maxHp));
   const cdPct = ability.cooldownMs > 0 ? 1 - w.abilityCooldown / ability.cooldownMs : 1;
 
@@ -263,14 +302,14 @@ export function GameScreen({ progress, onEnd }: Props) {
   const _sH = Math.sin(w.heading);
   const _cH = Math.cos(w.heading);
   const _vL = w.carVx * _cH + w.carVy * _sH;
-  const dbgEng = `hd=${(w.heading * 180 / Math.PI).toFixed(0)}°  vF=${w.forwardV.toFixed(0)}  vL=${_vL.toFixed(0)}  ω=${w.angularVelocity.toFixed(2)}`;
-  const dbgInp = `L=${steerLeftRef.current ? 1 : 0}  R=${steerRightRef.current ? 1 : 0}  gear=${gearVisual}  turbo=${turboVisual ? 1 : 0}  guns=${autoFireVisual ? 1 : 0}`;
-  const dbgZ = `z=${w.zombies.length}  pr=${w.projectiles.length}  hp=${w.hp.toFixed(0)}/${w.maxHp.toFixed(0)}`;
+  const dbgEng = !SHOW_DEBUG ? '' : `hd=${(w.heading * 180 / Math.PI).toFixed(0)}°  vF=${w.forwardV.toFixed(0)}  vL=${_vL.toFixed(0)}  ω=${w.angularVelocity.toFixed(2)}`;
+  const dbgInp = !SHOW_DEBUG ? '' : `L=${steerLeftRef.current ? 1 : 0}  R=${steerRightRef.current ? 1 : 0}  gear=${gearVisual}  turbo=${turboVisual ? 1 : 0}  guns=${autoFireVisual ? 1 : 0}`;
+  const dbgZ = !SHOW_DEBUG ? '' : `z=${w.zombies.length}  pr=${w.projectiles.length}  hp=${w.hp.toFixed(0)}/${w.maxHp.toFixed(0)}`;
 
   return (
     <View style={styles.root}>
       <Canvas
-        style={StyleSheet.absoluteFill}
+        style={StyleSheet.absoluteFillObject}
         gl={{ antialias: true }}
         camera={CAMERA_CONFIG}
       >
@@ -298,7 +337,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         ))}
       </Canvas>
 
-      <View style={[styles.hud, { top: HUD_TOP, left: 12, right: 60 }]} pointerEvents="none">
+      <View style={[styles.hud, { top: hudTop, left: leftInset + 12, right: rightInset + 108 }]} pointerEvents="none">
         <View style={styles.hudRow}>
           <Text style={styles.hudKills}>KILLS {w.kills}</Text>
           <Text style={styles.hudWave}>WAVE {w.wave + 1}</Text>
@@ -314,14 +353,27 @@ export function GameScreen({ progress, onEnd }: Props) {
         {w.streak > 0 && (
           <Text style={styles.streakText}>STREAK ×{w.streak}</Text>
         )}
-        <Text style={styles.dbg}>{dbgEng}</Text>
-        <Text style={styles.dbg}>{dbgInp}</Text>
-        <Text style={styles.dbg}>{dbgZ}</Text>
+        {SHOW_DEBUG && <Text style={styles.dbg}>{dbgEng}</Text>}
+        {SHOW_DEBUG && <Text style={styles.dbg}>{dbgInp}</Text>}
+        {SHOW_DEBUG && <Text style={styles.dbg}>{dbgZ}</Text>}
       </View>
 
       <StreakBanner world={w} />
 
-      <Pressable style={[styles.gear, { top: HUD_TOP - 2 }]} onPress={() => setAboutOpen(true)} hitSlop={8}>
+      <Pressable
+        accessibilityLabel="Pause"
+        style={[styles.gear, { top: hudTop - 2, right: rightInset + 60 }]}
+        onPress={() => setPaused(true)}
+        hitSlop={8}
+      >
+        <Text style={styles.gearIcon}>❚❚</Text>
+      </Pressable>
+      <Pressable
+        accessibilityLabel="About"
+        style={[styles.gear, { top: hudTop - 2, right: rightInset + 12 }]}
+        onPress={() => { setPaused(true); setAboutOpen(true); }}
+        hitSlop={8}
+      >
         <Text style={styles.gearIcon}>⚙</Text>
       </Pressable>
 
@@ -329,7 +381,7 @@ export function GameScreen({ progress, onEnd }: Props) {
         style={{
           position: 'absolute',
           left: 0, right: 0, bottom: 0,
-          height: CONTROL_OVERLAY_H,
+          height: CONTROL_OVERLAY_H + bottomInset,
         }}
         onStartShouldSetResponder={shouldSetResponder}
         onMoveShouldSetResponder={shouldSetResponder}
@@ -369,7 +421,7 @@ export function GameScreen({ progress, onEnd }: Props) {
                 styles.ctlBtn,
                 {
                   left: b.x,
-                  top: b.y - (sh - CONTROL_OVERLAY_H),
+                  top: b.y - (sh - CONTROL_OVERLAY_H - bottomInset),
                   width: b.w,
                   height: b.h,
                   borderRadius: b.w / 2,
@@ -385,8 +437,8 @@ export function GameScreen({ progress, onEnd }: Props) {
 
       {progress.selectedAbility !== 'none' && (
         <Pressable
-          onPress={() => { abilityTriggerRef.current = true; }}
-          style={[styles.abilityBtn, w.abilityCooldown > 0 && styles.abilityBtnDisabled]}
+          onPress={() => { if (!pausedRef.current) abilityTriggerRef.current = true; }}
+          style={[styles.abilityBtn, { top: hudTop + 52, right: rightInset + 12 }, w.abilityCooldown > 0 && styles.abilityBtnDisabled]}
         >
           <Text style={styles.abilityText}>{ability.name}</Text>
           <View style={styles.abilityCdBar}>
@@ -395,7 +447,22 @@ export function GameScreen({ progress, onEnd }: Props) {
         </Pressable>
       )}
 
-      <AboutModal visible={aboutOpen} onClose={() => setAboutOpen(false)} />
+      {paused && !aboutOpen && !w.gameOver && (
+        <View style={styles.pauseOverlay}>
+          <Text style={styles.pauseTitle}>PAUSED</Text>
+          <Pressable style={styles.pauseBtn} onPress={() => setPaused(false)}>
+            <Text style={styles.pauseBtnText}>RESUME</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.pauseBtn, styles.pauseBtnAlt]}
+            onPress={() => { setPaused(false); w.hp = 0; w.gameOver = true; }}
+          >
+            <Text style={styles.pauseBtnText}>END RUN</Text>
+          </Pressable>
+        </View>
+      )}
+
+      <AboutModal visible={aboutOpen} onClose={() => { setAboutOpen(false); setPaused(false); }} />
     </View>
   );
 }
@@ -740,6 +807,11 @@ const styles = StyleSheet.create({
   arrowText: { color: '#fff', fontSize: 36, fontWeight: '900' },
   midBtnText:  { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 1 },
 
+  pauseOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', zIndex: 30 },
+  pauseTitle: { color: '#ffd24a', fontWeight: '900', fontSize: 34, letterSpacing: 4, marginBottom: 14 },
+  pauseBtn: { minWidth: 200, paddingVertical: 14, borderRadius: 12, backgroundColor: '#ffd24a', alignItems: 'center', marginTop: 10 },
+  pauseBtnAlt: { backgroundColor: '#e34a4a' },
+  pauseBtnText: { color: '#0a0a0a', fontWeight: '900', fontSize: 16, letterSpacing: 2 },
   abilityBtn: { position: 'absolute', right: 16, top: 80, backgroundColor: '#222', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 2, borderColor: '#ffd24a', minWidth: 110, alignItems: 'center' },
   abilityBtnDisabled: { opacity: 0.5, borderColor: '#555' },
   abilityText: { color: '#ffd24a', fontWeight: '800', fontSize: 13 },

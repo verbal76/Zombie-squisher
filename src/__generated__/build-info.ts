@@ -2,19 +2,23 @@
 // Placeholder so IDE types resolve before the first build. The real values
 // are written by the script during every CI build ("Generate build info").
 export interface BuildInfo {
-  branch: string; commit: string; commitShort: string;
+  gameName: string; branch: string; commit: string; commitShort: string;
   dirty: boolean; builtAt: string;
   appVersion: string; androidVersionCode: number | null;
+  ciRun: number | null; apkFileName: string;
   buildId: string; otaId: string;
 }
 export const BUILD_INFO: BuildInfo = {
+  "gameName": "Zombie Squisher",
   "branch": "unknown",
   "commit": "unknown",
   "commitShort": "unknown",
   "dirty": false,
   "builtAt": "1970-01-01T00:00:00.000Z",
-  "appVersion": "1.0.0",
-  "androidVersionCode": null,
+  "appVersion": "1.1.0",
+  "androidVersionCode": 2,
+  "ciRun": null,
+  "apkFileName": "Zombie-Squisher-v1.1.0.apk",
   "buildId": "build unknown (unknown)",
   "otaId": "OTA unknown @ 1970-01-01T00:00:00.000Z"
 };

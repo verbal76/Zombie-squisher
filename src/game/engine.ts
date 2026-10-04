@@ -86,7 +86,13 @@ export function deriveStats(p: Progress): { vehicle: Vehicle; stats: DerivedStat
   const vehicle = VEHICLES[p.selectedVehicle];
   const weapon = WEAPONS[p.selectedWeapon];
 
-  const u = { speed: 0, armor: 0, handling: 0, acceleration: 0, ...(p.upgrades[vehicle.id] ?? {}) };
+  const saved = p.upgrades[vehicle.id];
+  const u = {
+    speed: saved?.speed ?? 0,
+    armor: saved?.armor ?? 0,
+    handling: saved?.handling ?? 0,
+    acceleration: saved?.acceleration ?? 0,
+  };
   const acceleration = vehicle.baseAcceleration + u.acceleration * 40;
 
   const stats: DerivedStats = {
@@ -178,6 +184,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
     if (p.selectedAbility === 'emp') {
       for (const z of world.zombies) {
+        if (z.hp <= 0) continue;
         if (z.kind === 'boss') {
           z.hp -= 200;
         } else if (z.maxHp <= 60) {
@@ -185,6 +192,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
         } else {
           z.vy *= 0.2;
         }
+        if (z.hp <= 0) registerKill(world, z);
       }
       world.shake = 14;
     }
@@ -205,6 +213,10 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const LAT_GRIP_TURN     = 2.5;
   const COAST_DAMP        = 0.5;
   const SKID_INJECTION    = 35;
+
+  // Per-contact tuning values below were authored per 60 fps frame; scale them
+  // by elapsed frames so damage and slowdown are the same at any frame rate.
+  const frames = dt * 60;
 
   const turboMul = input.turbo ? TURBO_MULTIPLIER : 1;
   const maxSpeed = stats.speed * nitroMul * turboMul;
@@ -392,7 +404,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
       if (isBumperImpact) {
         const speedScale = Math.max(1, Math.min(2, carSpeed / Math.max(1, stats.speed * 0.4)));
-        z.hp -= stats.bumperDamage * bumperBonus * speedScale;
+        z.hp -= stats.bumperDamage * bumperBonus * speedScale * frames;
 
         const inv = 1 / Math.max(1, carSpeed);
         const knockback = 80 + speedScale * 40;
@@ -402,9 +414,10 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
         // Per-hit slowdown: every zombie struck bleeds momentum so a
         // dense horde can stall the car.
-        world.forwardV *= PER_HIT_SLOW;
-        world.carVx   *= PER_HIT_SLOW;
-        world.carVy   *= PER_HIT_SLOW;
+        const hitSlow = Math.pow(PER_HIT_SLOW, frames);
+        world.forwardV *= hitSlow;
+        world.carVx   *= hitSlow;
+        world.carVy   *= hitSlow;
 
         if (z.hp <= 0) {
           world.shake = Math.min(24, world.shake + 2 + speedScale);
@@ -439,13 +452,13 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     }
 
     if (sideBoxL && hits(z, sideBoxL)) {
-      z.hp -= sideMod.damage;
+      z.hp -= sideMod.damage * frames;
       if (z.hp <= 0) registerKill(world, z);
       continue;
     }
 
     if (sideBoxR && hits(z, sideBoxR)) {
-      z.hp -= sideMod.damage;
+      z.hp -= sideMod.damage * frames;
       if (z.hp <= 0) registerKill(world, z);
     }
   }
