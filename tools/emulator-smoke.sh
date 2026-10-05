@@ -46,16 +46,27 @@ tap_label "DRIVE" && ok "menu visible, DRIVE tapped" || { shot menu-missing; fai
 sleep 6
 shot play-01
 
-# ---- gameplay: hold RIGHT steer + wait while zombies swarm ----
-SIZE=$(adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}
-DENS=$(adb shell wm density | grep -o '[0-9]*' | tail -1)
-# landscape: wm size reports portrait dims on some images; normalise so W>H
-if [ "$W" -lt "$H" ]; then T=$W; W=$H; H=$T; fi
-RX=$(( W - (16+44)*DENS/160 )); RY=$(( H - (22+44)*DENS/160 ))
-adb shell input swipe "$RX" "$RY" "$RX" "$RY" 3000 &
-sleep 4; shot play-02; wait
-sleep 8; shot play-03
-adb shell dumpsys meminfo "$PKG" | grep -E "TOTAL|Graphics|Native Heap" | head -4 | tee "$OUT/meminfo.txt"
+# ---- background / foreground lifecycle: auto-pause, no crash ----
+# Done early, while the run is certainly still alive: the starter car dies to the horde after roughly 35-130 s,
+# and a Game Over screen has nothing to pause. (A run that ended anyway is reported, not failed.)
+adb shell input keyevent KEYCODE_HOME; sleep 3
+adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 4; shot resumed
+PID2=$(adb shell pidof "$PKG" | tr -d '\r')
+[ -n "$PID2" ] && ok "survived background/foreground (pid $PID2)" || fail "app died on background/foreground"
+dump
+if python3 tools/ui.py "$OUT/ui.xml" find "PAUSED" >/dev/null; then
+  ok "auto-paused after backgrounding"
+  if tap_label "RESUME"; then
+    sleep 2; dump
+    python3 tools/ui.py "$OUT/ui.xml" find "PAUSED" >/dev/null && fail "PAUSED overlay did not go away after RESUME" || ok "RESUME dismisses the pause overlay"
+  else
+    fail "RESUME button not found on the pause overlay"
+  fi
+elif python3 tools/ui.py "$OUT/ui.xml" find "WIPED OUT" >/dev/null; then
+  echo "SMOKE NOTE: run had already ended (Game Over screen); pause check not applicable" | tee -a "$OUT/result.txt"
+else
+  shot pause-missing; fail "no PAUSED overlay after returning from background"
+fi
 
 # ---- pause / About diagnostics (3D models loaded, frames, errors) ----
 if tap_label "About"; then
@@ -72,6 +83,22 @@ else
   fail "could not open About (in-game gear missing)"
 fi
 
+# ---- close About (it pauses the game and, by design, hides the pause overlay while open) ----
+tap_label "CLOSE" && ok "About closed" || fail "could not close About"
+sleep 2
+dump; python3 tools/ui.py "$OUT/ui.xml" find "PAUSED" >/dev/null 2>&1 && fail "game still paused after closing About" || ok "game resumed after closing About"
+
+# ---- gameplay: hold RIGHT steer + wait while zombies swarm ----
+SIZE=$(adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}
+DENS=$(adb shell wm density | grep -o '[0-9]*' | tail -1)
+# landscape: wm size reports portrait dims on some images; normalise so W>H
+if [ "$W" -lt "$H" ]; then T=$W; W=$H; H=$T; fi
+RX=$(( W - (16+44)*DENS/160 )); RY=$(( H - (22+44)*DENS/160 ))
+adb shell input swipe "$RX" "$RY" "$RX" "$RY" 3000 &
+sleep 4; shot play-02; wait
+sleep 8; shot play-03
+adb shell dumpsys meminfo "$PKG" | grep -E "TOTAL|Graphics|Native Heap" | head -4 | tee "$OUT/meminfo.txt"
+
 # ---- process health ----
 PID=$(adb shell pidof "$PKG" | tr -d '\r')
 [ -n "$PID" ] && ok "app process alive (pid $PID) after $(( $(date +%s) - START ))s" || fail "app process is not running (crashed?)"
@@ -80,25 +107,6 @@ adb logcat -d -s ReactNativeJS:V AndroidRuntime:E DEBUG:F libc:F > "$OUT/logcat-
 if grep -q "FATAL EXCEPTION" "$OUT/logcat-full.txt"; then fail "FATAL EXCEPTION in logcat"; grep -A12 "FATAL EXCEPTION" "$OUT/logcat-full.txt" | head -40; else ok "no fatal exceptions"; fi
 grep -q "signal 11\|SIGSEGV\|Fatal signal" "$OUT/logcat-full.txt" && fail "native crash signal in logcat" || ok "no native crash"
 echo "--- ReactNativeJS errors/warnings:"; grep -E " E ReactNativeJS| W ReactNativeJS" "$OUT/logcat-app.txt" | head -20 || true
-
-# ---- close About (it pauses the game and, by design, hides the pause overlay while open) ----
-tap_label "CLOSE" && ok "About closed" || fail "could not close About"
-sleep 2
-dump; python3 tools/ui.py "$OUT/ui.xml" find "PAUSED" >/dev/null 2>&1 && fail "game still paused after closing About" || ok "game resumed after closing About"
-
-# ---- background / foreground lifecycle: auto-pause, no crash ----
-adb shell input keyevent KEYCODE_HOME; sleep 3
-adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 4; shot resumed
-PID2=$(adb shell pidof "$PKG" | tr -d '\r')
-[ -n "$PID2" ] && ok "survived background/foreground (pid $PID2)" || fail "app died on background/foreground"
-dump; python3 tools/ui.py "$OUT/ui.xml" find "PAUSED" >/dev/null && ok "auto-paused after backgrounding" || fail "no PAUSED overlay after returning from background"
-
-if tap_label "RESUME"; then
-  sleep 2; dump
-  python3 tools/ui.py "$OUT/ui.xml" find "PAUSED" >/dev/null && fail "PAUSED overlay did not go away after RESUME" || ok "RESUME dismisses the pause overlay"
-else
-  fail "RESUME button not found on the pause overlay"
-fi
 
 echo "SMOKE_FAILS=$FAILS" | tee -a "$OUT/result.txt"
 exit $FAILS
