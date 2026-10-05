@@ -66,12 +66,24 @@ if grep -q "FATAL EXCEPTION" "$OUT/logcat-full.txt"; then fail "FATAL EXCEPTION 
 grep -q "signal 11\|SIGSEGV\|Fatal signal" "$OUT/logcat-full.txt" && fail "native crash signal in logcat" || ok "no native crash"
 echo "--- ReactNativeJS errors/warnings:"; grep -E " E ReactNativeJS| W ReactNativeJS" "$OUT/logcat-app.txt" | head -20 || true
 
+# ---- close About (it pauses the game and, by design, hides the pause overlay while open) ----
+tap_label "CLOSE" && ok "About closed" || fail "could not close About"
+sleep 2
+dump; python3 tools/ui.py "$OUT/ui.xml" find "PAUSED" >/dev/null 2>&1 && fail "game still paused after closing About" || ok "game resumed after closing About"
+
 # ---- background / foreground lifecycle: auto-pause, no crash ----
 adb shell input keyevent KEYCODE_HOME; sleep 3
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 4; shot resumed
 PID2=$(adb shell pidof "$PKG" | tr -d '\r')
 [ -n "$PID2" ] && ok "survived background/foreground (pid $PID2)" || fail "app died on background/foreground"
 dump; python3 tools/ui.py "$OUT/ui.xml" find "PAUSED" >/dev/null && ok "auto-paused after backgrounding" || fail "no PAUSED overlay after returning from background"
+
+if tap_label "RESUME"; then
+  sleep 2; dump
+  python3 tools/ui.py "$OUT/ui.xml" find "PAUSED" >/dev/null && fail "PAUSED overlay did not go away after RESUME" || ok "RESUME dismisses the pause overlay"
+else
+  fail "RESUME button not found on the pause overlay"
+fi
 
 echo "SMOKE_FAILS=$FAILS" | tee -a "$OUT/result.txt"
 exit $FAILS
