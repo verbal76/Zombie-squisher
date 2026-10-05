@@ -9,13 +9,28 @@ fail() { echo "SMOKE FAIL: $*" | tee -a "$OUT/result.txt"; FAILS=$((FAILS+1)); }
 ok()   { echo "SMOKE OK:   $*" | tee -a "$OUT/result.txt"; }
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
 dump() { adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb pull /sdcard/ui.xml "$OUT/ui.xml" >/dev/null 2>&1; }
+# The software-rendered CI emulator regularly makes *system* apps stall (seen: "Pixel Launcher isn't responding"),
+# and that ANR dialog hides the game's window from uiautomator. It says nothing about the game, so dismiss it.
+dismiss_system_dialogs() {
+  if grep -q "isn't responding" "$OUT/ui.xml" 2>/dev/null; then
+    echo "SMOKE NOTE: dismissing a system ANR dialog (emulator launcher stall)" | tee -a "$OUT/result.txt"
+    if xy=$(python3 tools/ui.py "$OUT/ui.xml" find "Wait"); then adb shell input tap $xy; sleep 2; return 0; fi
+  fi
+  return 1
+}
 tap_label() { # tap by visible text or content-desc; retries while the UI settles
-  for _ in 1 2 3 4 5 6; do dump; if xy=$(python3 tools/ui.py "$OUT/ui.xml" find "$1"); then adb shell input tap $xy; return 0; fi; sleep 2; done
+  for _ in 1 2 3 4 5 6 7 8; do
+    dump
+    if dismiss_system_dialogs; then continue; fi
+    if xy=$(python3 tools/ui.py "$OUT/ui.xml" find "$1"); then adb shell input tap $xy; return 0; fi
+    sleep 2
+  done
   return 1
 }
 
 adb wait-for-device
 adb shell getprop ro.build.version.sdk | tee "$OUT/device-sdk.txt"
+adb shell settings put global hide_error_dialogs 1 || true       # keep system ANR/crash dialogs off the screen (crashes are still caught via logcat)
 adb install -r "$APK" > "$OUT/install.txt" 2>&1 && ok "installed $(basename "$APK")" || { cat "$OUT/install.txt"; fail "install failed"; exit 1; }
 adb shell pm dump "$PKG" | grep -E "versionName|versionCode|targetSdk" | head -4 | tee "$OUT/pm.txt"
 adb logcat -c
