@@ -1,14 +1,23 @@
 name: CI
 
-# Fast checks on every branch and PR. No secrets, no publishing, no OTA.
+# Checks on pull requests only (a push to a PR branch would otherwise run everything twice), skipped for
+# docs-only changes, and superseded runs are cancelled. No secrets, no publishing, no OTA.
+# Everything here can be run locally first (npm run check); see CLAUDE.md "Actions budget".
 on:
-  push:
-    branches-ignore:
-      - 'Github-build-pipeline-zombie-crusher'   # its own pipeline runs the same checks before building
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'agentic docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:

@@ -1,10 +1,14 @@
 name: Android Candidate APK
 
-# Builds an owner-testable APK from working branches. It does not publish a release or an OTA.
+# Builds an owner-testable APK from a working branch. It does not publish a release or an OTA.
+# MANUAL ONLY (Actions budget policy, see CLAUDE.md): never on push. Dispatch it when an APK is actually needed.
 on:
-  push:
-    branches: ['ccr-**', 'candidate/**']
   workflow_dispatch:
+    inputs:
+      smoke:
+        description: 'Also run the emulator smoke test (~5 min extra)'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -18,5 +22,6 @@ jobs:
     uses: ./.github/workflows/build-apk.yml
     with:
       profile: preview
+      run_smoke: ${{ inputs.smoke }}
     secrets:
       EXPO_TOKEN: ${{ secrets.ZOMBIE }}

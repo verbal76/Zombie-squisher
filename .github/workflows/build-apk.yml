@@ -9,6 +9,9 @@ on:
       profile:
         type: string
         default: preview
+      run_smoke:
+        type: boolean
+        default: true
     secrets:
       EXPO_TOKEN:
         required: true
@@ -84,10 +87,11 @@ jobs:
           name: ${{ steps.name.outputs.artifact_name }}
           path: dist/*
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
 
   smoke:
     needs: build
+    if: ${{ inputs.run_smoke }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
