@@ -10,10 +10,11 @@
 // block inside android/app/build.gradle's top-level `android { }` block.
 // Idempotent: detects its own SENTINEL and skips if already injected.
 
-const { withAppBuildGradle } = require('@expo/config-plugins');
+const { withAppBuildGradle } = require("expo/config-plugins");
 
+// AGP 8.x: aaptOptions is deprecated (removed in AGP 9); androidResources is the supported block.
 const SENTINEL = "noCompress 'glb'";
-const INJECT = `\n    aaptOptions {\n        noCompress 'glb', 'gltf'\n    }\n`;
+const INJECT = `\n    androidResources {\n        noCompress 'glb', 'gltf'\n    }\n`;
 
 function withNoCompressGlb(config) {
   return withAppBuildGradle(config, (cfg) => {

@@ -1,0 +1,129 @@
+name: Build, verify and smoke-test APK
+
+# Reusable. Builds the signed APK with the project's EAS credentials (same key as every previously
+# shipped build, so installs update in place), renames it <Game>-v<version>.apk, verifies it, and
+# launches it on an emulator. Never publishes an OTA and never creates a release.
+on:
+  workflow_call:
+    inputs:
+      profile:
+        type: string
+        default: preview
+      run_smoke:
+        type: boolean
+        default: true
+    secrets:
+      EXPO_TOKEN:
+        required: true
+    outputs:
+      apk_name:
+        value: ${{ jobs.build.outputs.apk_name }}
+      artifact_name:
+        value: ${{ jobs.build.outputs.artifact_name }}
+
+env:
+  PACKAGE: com.verbal76.zombiesquisher
+  # Public certificate fingerprint of the key that signed APK build #76 (not a secret).
+  EXPECTED_SIGNER: 178015BD0312E195272E308093F551B9DC1436A1869B79B3E8CF1497BF0DA4EC
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    outputs:
+      apk_name: ${{ steps.name.outputs.apk_name }}
+      artifact_name: ${{ steps.name.outputs.artifact_name }}
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK (preinstalled on the runner image; accept licences so Gradle can fetch build-tools/NDK)
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" | tail -3
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: npm ci
+      - name: Checks
+        run: npm run check
+      - name: Generate build info
+        run: node scripts/write-build-info.mjs
+      - name: Brand assets
+        run: npm run prepare-assets
+      - name: Build with EAS (local, no EAS build minutes)
+        # A healthy build takes ~15 min. Fail fast: a Gradle daemon can deadlock after an OOM and would otherwise
+        # burn the whole job timeout (seen: 74 min).
+        timeout-minutes: 40
+        run: |
+          mkdir -p build
+          eas build --platform android --profile "${{ inputs.profile }}" --local --non-interactive --output build/raw.apk
+      - name: Name APK
+        id: name
+        run: |
+          mkdir -p dist
+          OUT=$(node tools/apk-name.js build/raw.apk dist)
+          echo "apk_name=$(basename "$OUT")" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$(basename "$OUT" .apk)" >> "$GITHUB_OUTPUT"
+      - name: Verify APK (identity, signer, target SDK, 16 KB)
+        run: |
+          VC=$(node -p "require('./app.json').expo.android.versionCode")
+          VN=$(node -p "require('./app.json').expo.version")
+          tools/verify-apk.sh "dist/${{ steps.name.outputs.apk_name }}" "$PACKAGE" "$VC" "$VN" "$EXPECTED_SIGNER"
+          (cd dist && sha256sum "${{ steps.name.outputs.apk_name }}" | tee "${{ steps.name.outputs.apk_name }}.sha256")
+          echo "Source SHA: $GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.artifact_name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  smoke:
+    needs: build
+    if: ${{ inputs.run_smoke }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: dist
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pillow
+      - name: Launch on emulator, play, screenshot
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          force-avd-creation: false
+          disable-animations: true
+          script: bash tools/emulator-smoke.sh "dist/${{ needs.build.outputs.apk_name }}" com.verbal76.zombiesquisher
+      - name: Print screenshots (so they can be inspected from the log)
+        if: always()
+        run: python3 tools/print-screenshots.py smoke || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-screenshots-${{ github.run_number }}
+          path: smoke/
+          retention-days: 14

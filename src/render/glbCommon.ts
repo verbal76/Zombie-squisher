@@ -1,37 +1,24 @@
-// Loads a character GLB from assets/ as a binary file via expo-asset and
-// hands it to three.js GLTFLoader. The character texture is loaded
-// separately and grafted onto every mesh's material because the GLB's
-// internal texture URI ("Textures/texture-X.png") won't resolve in our
-// flat-layout assets/ directory.
-
-import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+// Shared GLB helpers for the character and vehicle loaders. Pure (no Expo / React Native
+// imports) so they are unit tested against every real GLB in assets/.
 import { BufferAttribute, Group, MeshBasicMaterial, Object3D } from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { CHARACTER_GLB, CHARACTER_TEX, CharacterId } from '../assets/characters';
-import { Diag } from '../debug/diagnostics';
-import { getPaletteSampler, PaletteSampler } from './paletteSampler';
 
-const cache: Partial<Record<CharacterId, Group>> = {};
-const loading: Partial<Record<CharacterId, Promise<Group>>> = {};
+/** Anything that can turn a UV coordinate into an RGB triple (see paletteSampler.ts). */
+export interface PaletteLike { sample(u: number, v: number): [number, number, number] | number[]; }
 
-async function fetchBuffer(uri: string): Promise<ArrayBuffer> {
-  const b64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+export function base64ToArrayBuffer(b64: string): ArrayBuffer {
   const binStr = atob(b64);
   const bytes = new Uint8Array(binStr.length);
   for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
   return bytes.buffer;
 }
 
-// See the matching comment in loadVehicle.ts: we must strip the entire
+// We must strip the entire
 // images/textures arrays AND every texture reference inside each material
 // from the GLB's JSON header, not just the image URIs. The previous "delete
 // img.uri" approach left empty image entries behind that GLTFLoader then
 // rejected with "Image N is missing URI and bufferView", which threw before
 // our post-parse texture strip could run.
-function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
+export function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
   const view = new DataView(buffer);
   if (view.getUint32(0, true) !== 0x46546c67) return buffer;
   const totalLen = view.getUint32(8, true);
@@ -110,7 +97,42 @@ function stripExternalImageUris(buffer: ArrayBuffer): ArrayBuffer {
   return out.buffer;
 }
 
-function bakeVertexColors(scene: Group, sampler: PaletteSampler): void {
+// Every texture slot a GLTF material can populate. In React Native there is no Image
+// constructor, so GLTFLoader's textures have no .image and the renderer crashes in
+// getDimensions() when it tries to upload them. They are nulled before first render.
+export const TEXTURE_KEYS = [
+  'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap',
+  'emissiveMap', 'bumpMap', 'displacementMap', 'alphaMap',
+  'envMap', 'lightMap', 'specularMap',
+  'gradientMap', 'matcap',
+  'clearcoatMap', 'clearcoatRoughnessMap', 'clearcoatNormalMap',
+  'sheenColorMap', 'sheenRoughnessMap',
+  'transmissionMap', 'thicknessMap',
+  'iridescenceMap', 'iridescenceThicknessMap',
+  'anisotropyMap',
+] as const;
+
+/** Makes a freshly parsed GLTF scene safe to render: no texture refs, no culling, fresh bounds. */
+export function prepareScene(scene: Object3D): void {
+  scene.traverse((node: any) => {
+    if (!node.isMesh) return;
+    node.frustumCulled = false;
+    if (node.material) {
+      for (const key of TEXTURE_KEYS) {
+        if (node.material[key]) node.material[key] = null;
+      }
+      node.material.needsUpdate = true;
+    }
+    if (node.geometry) {
+      node.geometry.computeBoundingBox();
+      node.geometry.computeBoundingSphere();
+    }
+  });
+}
+
+// Bakes per-vertex colours into every mesh by sampling the palette PNG at each vertex's UV, then swaps the
+// material for MeshBasicMaterial(vertexColors) so no GPU texture is ever uploaded (docs/glb-render-pipeline.md bug #6).
+export function bakeVertexColors(scene: Group, sampler: PaletteLike): void {
   scene.traverse((node: any) => {
     if (!node.isMesh || !node.geometry) return;
     const geom = node.geometry;
@@ -135,76 +157,4 @@ function bakeVertexColors(scene: Group, sampler: PaletteSampler): void {
       vertexColors: true,
     });
   });
-}
-
-async function loadOnce(id: CharacterId): Promise<Group> {
-  const glbAsset = Asset.fromModule(CHARACTER_GLB[id]);
-  await glbAsset.downloadAsync();
-  const glbUri = glbAsset.localUri ?? glbAsset.uri;
-  if (!glbUri) throw new Error(`character ${id}: no GLB URI`);
-  const raw = await fetchBuffer(glbUri);
-  const patched = stripExternalImageUris(raw);
-
-  const loader = new GLTFLoader();
-  const gltf = await new Promise<any>((resolve, reject) => {
-    loader.parse(patched, '', resolve, reject);
-  });
-
-  const textureKeys = [
-    'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap',
-    'emissiveMap', 'bumpMap', 'displacementMap', 'alphaMap',
-    'envMap', 'lightMap', 'specularMap',
-    'gradientMap', 'matcap',
-    'clearcoatMap', 'clearcoatRoughnessMap', 'clearcoatNormalMap',
-    'sheenColorMap', 'sheenRoughnessMap',
-    'transmissionMap', 'thicknessMap',
-    'iridescenceMap', 'iridescenceThicknessMap',
-    'anisotropyMap',
-  ];
-  gltf.scene.traverse((node: any) => {
-    if (node.isMesh) {
-      node.frustumCulled = false;
-      if (node.material) {
-        for (const key of textureKeys) {
-          if (node.material[key]) node.material[key] = null;
-        }
-        node.material.needsUpdate = true;
-      }
-      if (node.geometry) {
-        node.geometry.computeBoundingBox();
-        node.geometry.computeBoundingSphere();
-      }
-    }
-  });
-
-  try {
-    const palette = await getPaletteSampler(CHARACTER_TEX[id]);
-    bakeVertexColors(gltf.scene, palette);
-  } catch (err) {
-    console.warn(`character ${id}: vertex color bake failed`, err);
-  }
-
-  return gltf.scene as Group;
-}
-
-export async function loadCharacter(id: CharacterId): Promise<Object3D> {
-  Diag.attemptModel();
-  if (cache[id]) {
-    Diag.loadModel();
-    return cache[id]!.clone(true);
-  }
-  if (!loading[id]) {
-    loading[id] = loadOnce(id).then((s) => {
-      cache[id] = s;
-      return s;
-    });
-  }
-  try {
-    const s = await loading[id]!;
-    Diag.loadModel();
-    return s.clone(true);
-  } catch (err) {
-    Diag.setLoadError(`character ${id}`, err);
-    throw err;
-  }
 }

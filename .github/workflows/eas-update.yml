@@ -16,6 +16,8 @@ on:
       - '**/*.md'
       - 'agentic docs/**'
       - 'scripts/**'
+      - 'tests/**'
+      - 'tools/**'
   workflow_dispatch:
     inputs:
       branch:
@@ -44,7 +46,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Setup EAS
         uses: expo/expo-github-action@v8
@@ -53,7 +55,7 @@ jobs:
           token: ${{ secrets.ZOMBIE }}
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci
 
       - name: Generate build info
         run: node scripts/write-build-info.mjs

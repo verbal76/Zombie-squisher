@@ -1,0 +1,72 @@
+name: CI
+
+# Checks on pull requests only (a push to a PR branch would otherwise run everything twice), skipped for
+# docs-only changes, and superseded runs are cancelled. No secrets, no publishing, no OTA.
+# Everything here can be run locally first (npm run check); see CLAUDE.md "Actions budget".
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'agentic docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Lint workflows
+        run: pip install actionlint-py && actionlint
+      - run: npm ci
+      - name: Typecheck and tests
+        run: npm run check
+      - name: Brand assets
+        run: npm run prepare-assets
+      - name: Bundle check (Metro, Hermes)
+        run: CI=1 npx expo export --platform android --output-dir "$RUNNER_TEMP/export"
+      - name: Native project generation check
+        run: |
+          CI=1 npx expo prebuild --platform android --no-install
+          # Gradle needs more Metaspace than the template's 512m for KSP (OOM + daemon hang seen in CI)
+          grep -q 'MaxMetaspaceSize=1536m' android/gradle.properties
+          grep -q 'versionCode 2' android/app/build.gradle || grep -q "versionCode $(node -p "require('./app.json').expo.android.versionCode")" android/app/build.gradle
+      - name: Dependency compatibility (expo-doctor)
+        run: npx expo-doctor
+        continue-on-error: true
+
+  ui-preview:
+    # Renders every pure-UI screen in a browser (react-native-web) at several landscape sizes and safe-area
+    # insets, and fails on page errors, controls that leave the screen, or touch targets under 44 px.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build UI gallery (web)
+        run: EXPO_PUBLIC_UI_GALLERY=1 CI=1 npx expo export --platform web --output-dir "$RUNNER_TEMP/gallery"
+      - name: Screenshots + layout assertions
+        run: CHROME_PATH=/usr/bin/google-chrome node tools/ui-shots.mjs "$RUNNER_TEMP/gallery" ui-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-shots
+          path: ui-shots/
+          retention-days: 7
