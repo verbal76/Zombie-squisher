@@ -37,6 +37,8 @@ jobs:
 
   release-apk:
     needs: apk
+    # Only the authoritative pipeline branch may publish a release (a manual dispatch from any other branch builds only).
+    if: ${{ github.ref == 'refs/heads/Github-build-pipeline-zombie-crusher' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -50,6 +52,8 @@ jobs:
         with:
           files: dist/*
           tag_name: ${{ format('apk-build-{0}', github.run_number) }}
+          # Without this the new tag lands on the DEFAULT branch head, not the built commit (all apk-build-* tags before 77 do).
+          target_commitish: ${{ github.sha }}
           name: "${{ format('{0} (build {1})', needs.apk.outputs.artifact_name, github.run_number) }}"
           prerelease: false
           make_latest: "true"
@@ -65,6 +69,13 @@ jobs:
       EXPO_TOKEN: ${{ secrets.ZOMBIE }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Source must be on the authoritative pipeline branch
+        run: |
+          git fetch origin Github-build-pipeline-zombie-crusher
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/Github-build-pipeline-zombie-crusher \
+            || { echo "::error::$GITHUB_SHA is not part of Github-build-pipeline-zombie-crusher; refusing to build a store bundle from it"; exit 1; }
       - uses: actions/setup-node@v4
         with:
           node-version: 22

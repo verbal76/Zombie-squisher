@@ -26,12 +26,20 @@ const appVersion         = pkg.version ?? app?.expo?.version ?? 'unknown';
 const androidVersionCode = app?.expo?.android?.versionCode ?? null;
 const apkFileName        = `${gameName.trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}-v${app?.expo?.version ?? appVersion}.apk`;
 
+// Provenance: what exactly this build is made from (see CLAUDE.md "One product, one history").
+const depVersion = (name) => { try { return JSON.parse(readFileSync(`node_modules/${name}/package.json`, 'utf8')).version; } catch { return 'unknown'; } };
+const platform       = env.BUILD_PLATFORM || 'android';
+const refType        = env.GITHUB_REF_TYPE || 'local';
+const runtimeVersion = typeof app?.expo?.runtimeVersion === 'string' ? app.expo.runtimeVersion : (app?.expo?.runtimeVersion?.policy === 'appVersion' ? app?.expo?.version : 'unknown');
+const toolchain      = { node: process.version, expo: depVersion('expo'), reactNative: depVersion('react-native'), three: depVersion('three') };
+
 const buildId = `build ${commitShort} (${branch})${dirty ? ' [dirty]' : ''}`;
 const otaId   = `OTA ${commitShort} @ ${builtAt}`;
 
 const data = {
   gameName, branch, commit, commitShort, dirty, builtAt,
   appVersion, androidVersionCode, ciRun, apkFileName,
+  platform, refType, runtimeVersion, toolchain,
   buildId, otaId,
 };
 
@@ -43,6 +51,8 @@ writeFileSync(OUTPUT,
   `  dirty: boolean; builtAt: string;\n` +
   `  appVersion: string; androidVersionCode: number | null;\n` +
   `  ciRun: number | null; apkFileName: string;\n` +
+  `  platform: string; refType: string; runtimeVersion: string;\n` +
+  `  toolchain: { node: string; expo: string; reactNative: string; three: string };\n` +
   `  buildId: string; otaId: string;\n` +
   `}\n` +
   `export const BUILD_INFO: BuildInfo = ${JSON.stringify(data, null, 2)};\n`
