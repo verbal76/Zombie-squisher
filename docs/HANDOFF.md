@@ -61,3 +61,16 @@ Android 12+ system splash = background `#0d0805` with a transparent icon → in-
 
 ## Known remaining issues
 See `agentic docs/KNOWN_ISSUES.md`. Not verifiable without a device: real-device frame rate at max density, audio mix/loudness on phone speakers, touch feel. Music and SFX are synthesised and functional but would benefit from a human audio pass. App icon is original procedural artwork; real art would be better.
+
+## Owner physical test (the only remaining gate)
+Candidate: source `384f100` (game code identical to the PR head; later commits are CI/docs only). Get the APK from Actions artifact
+`Zombie-Squisher-v1.1.0` of run 37252267966 (expires 2026-11-04; rebuild with `android-candidate.yml` if gone), SHA-256
+`ad89f08afc39e89ec83ad6864a1b82ddc621b59d0a314a124d05a421ae09f1a0`. It is signed with the shipped key, so it installs over build #76 and keeps progress.
+Please check on a real phone, in landscape, and report only what looks wrong:
+1. Install over the old app: opens, Hot Attic Games splash, menu, progress/garage data still present.
+2. Play 3 runs (hatchback, then a heavier vehicle): steering/turbo/gear buttons feel right, no dead zones near screen edges or notch.
+3. Frame rate once the horde is dense (about 7 s in): smooth, or visibly choppy? Note the phone model.
+4. Audio on the phone speaker: engine, squishes, music; too loud / harsh / missing anything? Mute toggles work.
+5. Home-button away and back: game pauses, RESUME works. Screen rotate / lock does nothing odd.
+6. About screen shows version 1.1.0, build SHA and "3D models 19/19".
+Decisions only you can make: spawn-rate escalation vs "100x", starter-car toughness, game name (Squisher vs Crusher), final icon art.
