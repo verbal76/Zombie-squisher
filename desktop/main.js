@@ -36,6 +36,32 @@ function log(...a) {
 }
 process.on('uncaughtException', (e) => log('uncaughtException', String(e && e.stack || e)));
 
+// ---- progress mirror (Steam Cloud-ready plain file) ----------------------------------------------------------------
+// The game stores progress in localStorage (a LevelDB directory, which is a poor Steam Cloud / backup target and can be
+// damaged by a crash). Every progress write is mirrored to <userData>/saves/progress.json with an atomic replace and a
+// .bak of the previous good copy; preload.js restores localStorage from it when the live copy is missing or corrupt.
+// Only progress is mirrored: settings and device preferences stay local (they must not roam between devices).
+const saveDir = () => path.join(app.getPath('userData'), 'saves');
+const saveFile = () => path.join(saveDir(), 'progress.json');
+const validSave = (o) => o && typeof o === 'object' && o.schema === 1 && o.keys && typeof o.keys === 'object';
+function readSave() {
+  for (const f of [saveFile(), saveFile() + '.bak']) {
+    try { const o = JSON.parse(fs.readFileSync(f, 'utf8')); if (validSave(o)) return o; } catch { /* missing or corrupt: try the backup */ }
+  }
+  return null;
+}
+function writeSave(key, value) {
+  if (typeof key !== 'string' || !/^zs:progress:/.test(key) || typeof value !== 'string' || value.length > 1_000_000) return;
+  try { JSON.parse(value); } catch { return; }                                  // never mirror a corrupt value over a good one
+  const cur = readSave() ?? { schema: 1, keys: {} };
+  cur.keys[key] = value; cur.savedAt = new Date().toISOString();
+  fs.mkdirSync(saveDir(), { recursive: true });
+  const tmp = saveFile() + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(cur));
+  try { if (fs.existsSync(saveFile())) fs.copyFileSync(saveFile(), saveFile() + '.bak'); } catch {}
+  fs.renameSync(tmp, saveFile());
+}
+
 // ---- app:// protocol ---------------------------------------------------------------------------------------------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.css': 'text/css; charset=utf-8', '.map': 'application/json' };
@@ -105,6 +131,8 @@ app.whenReady().then(() => {
   ipcMain.handle('hag:info', () => ({ platform: process.platform, version: app.getVersion(), electron: process.versions.electron, steamDeck: onSteamDeck(), userData: app.getPath('userData') }));
   ipcMain.on('hag:toggle-fullscreen', () => mainWindow && mainWindow.setFullScreen(!mainWindow.isFullScreen()));
   ipcMain.on('hag:quit', () => app.quit());
+  ipcMain.on('hag:save-read', (e) => { e.returnValue = readSave(); });
+  ipcMain.on('hag:save-write', (_e, key, value) => { try { writeSave(key, value); } catch (err) { log('save mirror failed', String(err)); } });
   createWindow();
   // Suspend / resume (laptop lid, Steam Deck sleep): tell the page so the game pauses and input state resets.
   powerMonitor.on('suspend', () => { log('suspend'); mainWindow?.webContents.send('hag:suspend'); });

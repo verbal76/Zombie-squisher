@@ -4,7 +4,7 @@
 import { useEffect, useRef } from 'react';
 import type { ControlBus } from '../game/controlBus';
 import {
-  GamepadMapper, KeyboardMapper, KEY_PROMPTS, MenuEvent, NO_INTENT, GameIntent, PROMPTS, PadSnapshot,
+  GamepadMapper, KeyboardMapper, KEY_PROMPTS, MenuEvent, NO_INTENT, GameIntent, PROMPTS, PadSnapshot, PromptMode, PromptSelector, nextPromptMode, parsePromptMode,
   keyToMenuEvent, mergeIntents, pickNextFocus, GLYPH_IDS,
 } from './inputMapping';
 import { glyphUri } from './glyphs.web';
@@ -20,7 +20,11 @@ let game: DesktopGameInput | null = null;
 const pad = new GamepadMapper();
 const kb = new KeyboardMapper();
 const menuQueue: MenuEvent[] = [];
-let source: 'pad' | 'kb' = 'kb';
+const prompts = new PromptSelector();
+let promptMode: PromptMode = 'auto';
+let toastUntil = 0;
+let exitEl: HTMLButtonElement | null = null;
+const PROMPT_KEY = 'hag:prompt-mode';       // per device, never part of the cloud-synced save
 let padIndex: number | null = null;
 let hintEl: HTMLDivElement | null = null;
 let lastFocusScan = 0;
@@ -63,7 +67,14 @@ function click(el: HTMLElement): void {
   el.click();       // React Native Web's Pressable activates on a real click (a synthetic Enter keydown is ignored)
 }
 
+function cyclePromptMode(): void {
+  promptMode = nextPromptMode(promptMode);
+  try { localStorage.setItem(PROMPT_KEY, promptMode); } catch { /* storage unavailable: keep in memory */ }
+  toastUntil = performance.now() + 1800;
+}
+
 function handleMenuEvent(ev: MenuEvent): void {
+  if (ev === 'prompts') { cyclePromptMode(); return; }
   const list = visibleFocusables();
   if (list.length === 0) return;
   const cur = list.indexOf(document.activeElement as HTMLElement);
@@ -90,8 +101,14 @@ function readPad(): PadSnapshot | null {
 }
 
 // ---- hints (controller prompts) -----------------------------------------------------------------------------------
-function setHint(playing: boolean): void {
+function setHint(playing: boolean, now: number): void {
   if (!hintEl) return;
+  const source = prompts.current(promptMode);
+  if (now < toastUntil) {
+    const key = `toast:${promptMode}`;
+    if (hintEl.dataset.key !== key) { hintEl.dataset.key = key; hintEl.innerHTML = `<span class="v">Prompt style: ${promptMode === 'auto' ? 'Automatic' : promptMode === 'gamepad' ? 'Gamepad' : 'Keyboard'}</span>`; }
+    return;
+  }
   const set = source === 'pad' ? (playing ? PROMPTS.play : PROMPTS.menu) : (playing ? KEY_PROMPTS.play : KEY_PROMPTS.menu);
   const key = `${source}:${playing}`;
   if (hintEl.dataset.key === key) return;
@@ -110,6 +127,8 @@ function installStyle(): void {
     #hag-hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);display:flex;gap:10px;align-items:center;
       padding:6px 14px;background:rgba(10,8,5,.72);border:1px solid rgba(255,255,255,.18);border-radius:8px;
       font:600 14px/1 system-ui,sans-serif;color:#ddd;pointer-events:none;z-index:2147483000;white-space:nowrap}
+    #hag-exit{position:fixed;left:16px;bottom:16px;min-width:140px;height:48px;padding:0 18px;background:#1c1510;color:#ffc400;border:2px solid #ffc400;
+      border-radius:10px;font:800 15px/1 system-ui,sans-serif;letter-spacing:1px;cursor:pointer;z-index:2147482000}
     #hag-hint img{height:30px;width:auto;vertical-align:middle;margin-right:-4px}
     #hag-hint .k{background:#ffc400;color:#111;border-radius:5px;padding:3px 7px;font-weight:800}
     #hag-hint .v{margin-right:8px}
@@ -117,6 +136,12 @@ function installStyle(): void {
   document.head.appendChild(style);
   hintEl = document.createElement('div'); hintEl.id = 'hag-hint'; hintEl.setAttribute('data-hag-ignore', '1');
   document.body.appendChild(hintEl);
+  try { promptMode = parsePromptMode(localStorage.getItem(PROMPT_KEY)); } catch { promptMode = 'auto'; }
+  exitEl = document.createElement('button');
+  exitEl.id = 'hag-exit'; exitEl.textContent = 'EXIT GAME'; exitEl.setAttribute('aria-label', 'EXIT GAME'); exitEl.setAttribute('tabindex', '0');
+  exitEl.style.display = 'none';
+  exitEl.addEventListener('click', () => { const b = bridge() as any; if (b?.quit) b.quit(); else window.close(); });
+  document.body.appendChild(exitEl);
   document.addEventListener('focusin', (e) => { (e.target as HTMLElement)?.setAttribute?.('data-hag-focus', '1'); });
   document.addEventListener('focusout', (e) => { (e.target as HTMLElement)?.removeAttribute?.('data-hag-focus'); });
 }
@@ -127,7 +152,7 @@ function frame(now: number): void {
   const playing = !!game && game.active;
   const snap = readPad();
   const res = pad.poll(snap, playing, now);
-  if (snap && (res.menu.length || res.intent.ability || res.intent.pause || res.intent.steerLeft || res.intent.steerRight || res.intent.turbo)) source = 'pad';
+  if (snap && (res.menu.length || res.intent.ability || res.intent.pause || res.intent.steerLeft || res.intent.steerRight || res.intent.turbo)) prompts.note('pad', now);
 
   if (playing && game) {
     const k = kb.intent();
@@ -147,10 +172,13 @@ function frame(now: number): void {
     if (now - lastFocusScan > 250) {            // never lose focus: re-acquire after a screen change
       lastFocusScan = now;
       const list = visibleFocusables();
+      // EXIT GAME exists only on the main menu (controller-reachable: Steam requires a way to quit without a keyboard).
+      const onMainMenu = list.some((el) => el !== exitEl && /^drive\b/i.test(labelOf(el)));
+      if (exitEl) exitEl.style.display = onMainMenu && (bridge() !== undefined) ? 'block' : 'none';
       if (list.length) ensureFocus(list);
     }
   }
-  setHint(playing);
+  setHint(playing, now);
 }
 
 function systemPause(): void {
@@ -164,7 +192,7 @@ export function installDesktopShell(): void {
   installStyle();
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || (e.altKey && e.key === 'Enter')) return;       // leave browser/Electron shortcuts alone
-    source = 'kb';
+    if (!(e.code === 'F2')) prompts.note('kb', performance.now());
     if (game && game.active) { if (kb.keyDown(e.code, e.repeat)) e.preventDefault(); return; }
     const ev = keyToMenuEvent(e.code);
     if (ev) { e.preventDefault(); if (!e.repeat || ev === 'up' || ev === 'down' || ev === 'left' || ev === 'right') menuQueue.push(ev); }
@@ -172,7 +200,7 @@ export function installDesktopShell(): void {
   window.addEventListener('keyup', (e) => kb.keyUp(e.code), true);
   window.addEventListener('blur', systemPause);
   document.addEventListener('visibilitychange', () => { if (document.hidden) systemPause(); });
-  window.addEventListener('gamepadconnected', (e) => { source = 'pad'; if (padIndex === null) padIndex = (e as GamepadEvent).gamepad.index; });
+  window.addEventListener('gamepadconnected', (e) => { prompts.note('pad', performance.now()); if (padIndex === null) padIndex = (e as GamepadEvent).gamepad.index; });
   window.addEventListener('gamepaddisconnected', (e) => {
     if (padIndex === (e as GamepadEvent).gamepad.index) { padIndex = null; pad.reset(); systemPause(); }     // controller lost: pause, never run on blind
   });

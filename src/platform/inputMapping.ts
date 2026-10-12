@@ -14,7 +14,7 @@ export const MENU_REPEAT_MS = 130;
 
 export interface PadSnapshot { buttons: ReadonlyArray<number>; axes: ReadonlyArray<number>; }
 
-export type MenuEvent = 'up' | 'down' | 'left' | 'right' | 'confirm' | 'cancel' | 'start';
+export type MenuEvent = 'up' | 'down' | 'left' | 'right' | 'confirm' | 'cancel' | 'start' | 'prompts';
 
 /** What the player is asking the car to do right now (level state) plus one-shot actions (edges). */
 export interface GameIntent {
@@ -38,7 +38,7 @@ function hyst(prev: boolean, v: number, on: number, off: number): boolean {
  */
 export class GamepadMapper {
   private level = { left: false, right: false, turbo: false, reverse: false };
-  private prevEdge = { ability: false, guns: false, pause: false, up: false, down: false, left: false, right: false, confirm: false, cancel: false, start: false };
+  private prevEdge = { ability: false, guns: false, pause: false, up: false, down: false, left: false, right: false, confirm: false, cancel: false, start: false, view: false };
   private armed = false;
   private lastPlaying: boolean | null = null;
   private repeat: { dir: MenuEvent | null; next: number } = { dir: null, next: 0 };
@@ -96,6 +96,7 @@ export class GamepadMapper {
     if (edge('confirm', val(snap, BTN.A) > 0.5)) menu.push('confirm');
     if (edge('cancel', val(snap, BTN.B) > 0.5)) menu.push('cancel');
     if (edge('start', val(snap, BTN.START) > 0.5)) menu.push('start');
+    if (edge('view', val(snap, BTN.BACK) > 0.5)) menu.push('prompts');       // View/Back: cycle the prompt style manually
     return { intent: { ...NO_INTENT }, menu };
   }
 }
@@ -150,6 +151,7 @@ export function keyToMenuEvent(code: string): MenuEvent | null {
     case 'Enter': case 'NumpadEnter': case 'Space': return 'confirm';
     case 'Escape': case 'Backspace': return 'cancel';
     case 'KeyP': return 'start';
+    case 'F2': return 'prompts';
     default: return null;
   }
 }
@@ -209,3 +211,28 @@ export const GLYPH_IDS: Record<string, string[]> = {
   'A D / ← →': ['key/A', 'key/D'], 'W / Shift': ['key/W', 'key/Shift'], S: ['key/S'], Space: ['key/Space'], G: ['key/G'], Esc: ['key/Esc'],
   Arrows: ['key/Up', 'key/Down', 'key/Left', 'key/Right'], Enter: ['key/Enter'],
 };
+
+
+// ---- prompt family (which glyph set to show) -------------------------------------------------------------------------
+export type PromptMode = 'auto' | 'gamepad' | 'keyboard';
+export type PromptFamily = 'pad' | 'kb';
+export const PROMPT_MODES: ReadonlyArray<PromptMode> = ['auto', 'gamepad', 'keyboard'];
+export const nextPromptMode = (m: PromptMode): PromptMode => PROMPT_MODES[(PROMPT_MODES.indexOf(m) + 1) % PROMPT_MODES.length];
+export const parsePromptMode = (v: unknown): PromptMode => (v === 'gamepad' || v === 'keyboard' ? v : 'auto');
+export const PROMPT_SWITCH_HOLD_MS = 2500;
+
+/**
+ * Automatic prompt-family selection with hysteresis: the first input picks a family, later switches need
+ * PROMPT_SWITCH_HOLD_MS since the previous switch, so using both devices at once (e.g. Steam Deck trackpad/mouse plus
+ * pad) never makes the glyphs flicker. A manual mode overrides detection entirely.
+ */
+export class PromptSelector {
+  private fam: PromptFamily = 'kb';
+  private since = -Infinity;
+  private seen = false;
+  note(f: PromptFamily, now: number): void {
+    if (!this.seen) { this.seen = true; this.fam = f; this.since = now; return; }
+    if (f !== this.fam && now - this.since >= PROMPT_SWITCH_HOLD_MS) { this.fam = f; this.since = now; }
+  }
+  current(mode: PromptMode): PromptFamily { return mode === 'gamepad' ? 'pad' : mode === 'keyboard' ? 'kb' : this.fam; }
+}

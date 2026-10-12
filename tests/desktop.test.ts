@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { GLYPH_IDS, BTN, GamepadMapper, KeyboardMapper, MENU_REPEAT_FIRST_MS, MENU_REPEAT_MS, KEY_PROMPTS, PROMPTS, PadSnapshot, keyToMenuEvent, mergeIntents, NO_INTENT, pickNextFocus } from '../src/platform/inputMapping';
+import { GLYPH_IDS, PromptSelector, nextPromptMode, parsePromptMode, PROMPT_SWITCH_HOLD_MS, BTN, GamepadMapper, KeyboardMapper, MENU_REPEAT_FIRST_MS, MENU_REPEAT_MS, KEY_PROMPTS, PROMPTS, PadSnapshot, keyToMenuEvent, mergeIntents, NO_INTENT, pickNextFocus } from '../src/platform/inputMapping';
 import { createControlBus } from '../src/game/controlBus';
 import { computeControlLayout } from '../src/game/controls';
 
@@ -178,4 +178,32 @@ test('prompt glyphs: every prompt label is mapped, every glyph file exists, lice
   }
   const readme = read('assets/glyphs/README.md');
   assert.match(readme, /CC0/); assert.match(readme, /JulioCacko/); assert.match(readme, /NOT independently/);
+});
+
+test('prompt family: automatic selection has hysteresis (no glyph flicker in mixed input) and a manual override', () => {
+  const sel = new PromptSelector();
+  sel.note('pad', 0); assert.equal(sel.current('auto'), 'pad', 'first input decides');
+  sel.note('kb', 100); assert.equal(sel.current('auto'), 'pad', 'a keystroke right after does not flip it');
+  for (let t = 200; t < PROMPT_SWITCH_HOLD_MS; t += 200) { sel.note(t % 400 ? 'kb' : 'pad', t); }
+  assert.equal(sel.current('auto'), 'pad', 'rapid alternation never switches');
+  sel.note('kb', PROMPT_SWITCH_HOLD_MS + 10); assert.equal(sel.current('auto'), 'kb', 'sustained use of the other device switches once');
+  sel.note('pad', PROMPT_SWITCH_HOLD_MS + 20); assert.equal(sel.current('auto'), 'kb', 'and not straight back');
+  assert.equal(sel.current('gamepad'), 'pad'); assert.equal(sel.current('keyboard'), 'kb');
+  assert.deepEqual(['auto', 'gamepad', 'keyboard'].map((m) => nextPromptMode(m as any)), ['gamepad', 'keyboard', 'auto']);
+  assert.equal(parsePromptMode('junk'), 'auto'); assert.equal(parsePromptMode('keyboard'), 'keyboard');
+});
+
+test('manual prompt-style switch is reachable from the controller (View/Back) and the keyboard (F2)', () => {
+  const m = new GamepadMapper(); let t = armed(m, false);
+  assert.deepEqual(m.poll(pad({ [BTN.BACK]: 1 }), false, t += 16).menu, ['prompts']);
+  assert.equal(keyToMenuEvent('F2'), 'prompts');
+});
+
+test('desktop shell: the main menu gets a controller-reachable EXIT GAME, wired to a clean quit (Steam requires quitting without a keyboard)', () => {
+  const w = read('src/platform/desktop.web.ts');
+  assert.match(w, /EXIT GAME/);
+  assert.match(w, /tabindex', '0'/);
+  assert.match(w, /b\.quit\(\)/);
+  assert.match(w, /onMainMenu/);
+  assert.match(read('desktop/preload.js'), /quit:/);
 });

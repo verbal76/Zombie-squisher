@@ -42,7 +42,9 @@ check(Object.keys(k1).length >= 2, `game storage has data (${Object.keys(k1).len
 const second = launch(); const secondExit = await Promise.race([second.exit, sleep(15000).then(() => 'still-running')]);
 check(secondExit !== 'still-running', 'a second instance exits instead of opening a second copy');
 try { process.kill(-second.child.pid, 'SIGKILL'); } catch {}
-await pg.evaluate(() => window.hagDesktop.quit()).catch(() => {});
+// quit through the in-game EXIT GAME button (what a controller-only Steam Deck player would use)
+await pg.waitForFunction(() => { const e = document.getElementById('hag-exit'); return e && e.style.display === 'block'; }, null, { timeout: 15000 }).then(() => ok('EXIT GAME is shown on the main menu'), () => fail('EXIT GAME not shown on the main menu'));
+await pg.evaluate(() => document.getElementById('hag-exit').click()).catch(() => {});
 const r1 = await Promise.race([a.exit, sleep(20000).then(() => null)]);
 check(r1 && r1.code === 0, `clean quit exits with code 0 (got ${JSON.stringify(r1)})`);
 await b.close().catch(() => {});
@@ -52,7 +54,34 @@ a = launch(); ({ b, pg } = await connect(a.port));
 await pg.waitForFunction(() => document.body.innerText.includes('DRIVE'), null, { timeout: 60000 });
 const k2 = await keys(pg);
 check(k2['hag-restart-test'] === 'run-1', 'data written before a clean quit is present after relaunch');
-check(JSON.stringify(Object.keys(k2)) === JSON.stringify(Object.keys(k1)), 'same save keys after relaunch');
+const noBak = (o) => Object.keys(o).filter((k) => !k.endsWith(':bak')).sort();
+check(JSON.stringify(noBak(k2)) === JSON.stringify(noBak(k1)), 'same save keys after relaunch (apart from the new progress backup copy)');
+
+// 2b. the live storage is lost (or corrupted): progress must come back from the plain-file mirror
+await pg.evaluate(() => window.hagDesktop.quit()).catch(() => {});
+await Promise.race([a.exit, sleep(20000)]); await b.close().catch(() => {});
+const mirror = path.join(home, '.config', 'Zombie Squisher', 'saves', 'progress.json');
+check(fs.existsSync(mirror), 'a plain-file progress mirror exists (Steam Cloud-ready)');
+const mirrored = JSON.parse(fs.readFileSync(mirror, 'utf8'));
+check(mirrored.schema === 1 && Object.keys(mirrored.keys).some((k) => k.startsWith('zs:progress:')), 'mirror holds the versioned progress key');
+fs.rmSync(path.join(home, '.config', 'Zombie Squisher', 'Local Storage'), { recursive: true, force: true });
+a = launch(); ({ b, pg } = await connect(a.port));
+await pg.waitForFunction(() => document.body.innerText.includes('DRIVE'), null, { timeout: 60000 });
+const k2b = await keys(pg);
+check(k2b['zs:progress:v2'] === k1['zs:progress:v2'], 'progress restored from the mirror after the live storage was deleted');
+check(k2b['hag-restart-test'] === undefined, 'non-progress keys are not mirrored');
+await pg.evaluate(() => { localStorage.setItem('zs:progress:v2', '{corrupt'); });
+await pg.evaluate(() => window.hagDesktop.quit()).catch(() => {});
+await Promise.race([a.exit, sleep(20000)]); await b.close().catch(() => {});
+a = launch(); ({ b, pg } = await connect(a.port));
+await pg.waitForFunction(() => document.body.innerText.includes('DRIVE'), null, { timeout: 60000 });
+const k2c = await keys(pg);
+check(k2c['zs:progress:v2'] === k1['zs:progress:v2'], 'a corrupted live progress value is replaced by the last good mirror');
+await pg.evaluate(() => { localStorage.setItem('hag-restart-test', 'run-1'); });
+await pg.evaluate(() => window.hagDesktop.quit()).catch(() => {});
+await Promise.race([a.exit, sleep(20000)]); await b.close().catch(() => {});
+a = launch(); ({ b, pg } = await connect(a.port));
+await pg.waitForFunction(() => document.body.innerText.includes('DRIVE'), null, { timeout: 60000 });
 
 // 3. interrupted session: write, wait for the storage flush window, kill -9
 await pg.evaluate(() => { localStorage.setItem('hag-restart-test', 'run-2'); });

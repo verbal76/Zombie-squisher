@@ -13,7 +13,7 @@ function check(archive, platform, root) {
     ? execFileSync('tar', ['-tvzf', archive], { encoding: 'utf8', maxBuffer: 1 << 28 }).split('\n').filter(Boolean)
     : execFileSync('unzip', ['-Z', '-l', archive], { encoding: 'utf8', maxBuffer: 1 << 28 }).split('\n').filter((l) => /^[-d]/.test(l));
   const has = (re) => listing.some((l) => re.test(l));
-  const base = path.basename(archive).replace(/\.(tar\.gz|zip)$/, '');
+  const base = 'ZombieSquisher';   // fixed folder name inside every desktop archive
   if (!has(new RegExp(`${base}/BUILD-MANIFEST\\.json$`))) errs.push('BUILD-MANIFEST.json missing');
   if (!has(new RegExp(`${base}/README\\.txt$`))) errs.push('README.txt missing');
   if (!has(/resources\/app\.asar$/)) errs.push('resources/app.asar missing');

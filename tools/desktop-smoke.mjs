@@ -81,7 +81,7 @@ await shot('menu-1280x800');
 await press('DOWN'); const f1 = await focusLabel();
 check(f1 && f1 !== 'DRIVE', `D-pad down moves focus off DRIVE (now ${f1})`);
 await press('UP'); check((await focusLabel()) === 'DRIVE', 'D-pad up returns to DRIVE');
-await setPad({}, [0, 0.9, 0, 0]); await sleep(150); await setPad({}); await sleep(150);
+await setPad({}, [0, 0.9, 0, 0]); await frames(4); await setPad({}); await frames(4);
 check((await focusLabel()) !== 'DRIVE', 'left stick down also navigates menus');
 await press('UP');
 
@@ -102,20 +102,20 @@ check(await waitFor(() => has('KILLS')), 'A on DRIVE starts a run');
 await sleep(1500); await shot('play-1280x800');
 
 // ---- gameplay mapping ----
-await setPad({}, [0.9, 0, 0, 0]); await sleep(300);
+await setPad({}, [0.9, 0, 0, 0]); await frames(4);
 check(await active('steerRight active'), 'left stick right -> steer right'); 
-await setPad({}, [0.1, 0, 0, 0]); await sleep(300);
+await setPad({}, [0.1, 0, 0, 0]); await frames(4);
 check(!(await active('steerRight active')), 'stick back inside the dead zone releases steering (no drift)');
-await setPad({}, [-0.9, 0, 0, 0]); await sleep(300);
-check(await active('steerLeft active'), 'left stick left -> steer left'); await setPad({}); await sleep(200);
-await setPad({ RT: 1 }); await sleep(300); check(await active('turbo active'), 'RT -> turbo'); await setPad({}); await sleep(250);
+await setPad({}, [-0.9, 0, 0, 0]); await frames(4);
+check(await active('steerLeft active'), 'left stick left -> steer left'); await setPad({}); await frames(4);
+await setPad({ RT: 1 }); await frames(4); check(await active('turbo active'), 'RT -> turbo'); await setPad({}); await frames(4);
 check(!(await active('turbo active')), 'releasing RT releases turbo');
-await setPad({ LT: 1 }); await sleep(300); check(await active('gearReverse active'), 'LT held -> reverse gear'); await setPad({}); await sleep(250);
+await setPad({ LT: 1 }); await frames(4); check(await active('gearReverse active'), 'LT held -> reverse gear'); await setPad({}); await frames(4);
 check(await active('gearForward active'), 'releasing LT -> forward gear');
 const gunsBefore = await active('gunsToggle active'); await press('X'); await sleep(200);
 check((await active('gunsToggle active')) !== gunsBefore, 'X toggles guns');
 await press('X');
-await setPad({}, [0, 0, 0.9, 0.9]); await sleep(200); await setPad({}); check(true, 'right stick is ignored (camera is automatic in this game)');
+await setPad({}, [0, 0, 0.9, 0.9]); await frames(4); await setPad({}); check(true, 'right stick is ignored (camera is automatic in this game)');
 
 // keyboard
 await page.keyboard.down('ArrowRight'); await sleep(300); check(await active('steerRight active'), 'keyboard: Right arrow steers');
@@ -135,16 +135,16 @@ console.log(`PERF ${perfLine}`); log.push(`PERF ${perfLine}`);
 check(perf.ts.length > 20, 'render loop kept ticking during the sample');
 
 // ---- pause / resume / focus loss ----
-await setPad({ RT: 1, LT: 0 }, [0.9, 0, 0, 0]); await sleep(250);          // hold steer + turbo, then pause
-await setPad({ RT: 1, START: 1 }, [0.9, 0, 0, 0]); await sleep(150); await setPad({ RT: 1 }, [0.9, 0, 0, 0]); await sleep(300);
+await setPad({ RT: 1, LT: 0 }, [0.9, 0, 0, 0]); await frames(4);          // hold steer + turbo, then pause
+await setPad({ RT: 1, START: 1 }, [0.9, 0, 0, 0]); await frames(4); await setPad({ RT: 1 }, [0.9, 0, 0, 0]); await frames(4);
 check(await waitFor(() => has('PAUSED'), 3000), 'Start pauses');
 check(!(await active('steerRight active')) && !(await active('turbo active')), 'nothing stays held while paused');
 check((await focusLabel()) !== null, 'controller focus is on the pause menu');
-await setPad({}); await sleep(250);
+await setPad({}); await frames(4);
 await press('START'); check(await waitFor(async () => !(await has('PAUSED')), 3000), 'Start resumes from the pause menu');
-await setPad({ RT: 1 }); await sleep(250);
+await setPad({ RT: 1 }); await frames(4);
 check(await active('turbo active'), 're-pressing RT after resume works');
-await setPad({}); await sleep(200);
+await setPad({}); await frames(4);
 await page.evaluate(() => window.dispatchEvent(new Event('blur'))); await sleep(400);
 check(await has('PAUSED'), 'window focus loss pauses the game');
 await press('B'); check(await waitFor(async () => !(await has('PAUSED')), 3000), 'B (cancel) resumes from the pause menu');
@@ -156,7 +156,7 @@ check(!(await has('PAUSED')), 'controller hot-plug: reconnect and resume');
 await shot('play-resumed');
 
 // ---- layout at Steam Deck / other sizes: nothing clipped, targets big enough ----
-for (const [w, h, name] of [[1280, 800, 'steamdeck-1280x800'], [1280, 720, '16x9-1280x720'], [1920, 1080, '1080p'], [1024, 640, 'small-1024x640']]) {
+for (const [w, h, name] of [[1280, 800, 'steamdeck-1280x800'], [1280, 720, '16x9-1280x720'], [1920, 1080, '1080p'], [1024, 640, 'small-1024x640'], [2560, 1080, 'ultrawide-2560x1080']]) {
   await page.setViewportSize({ width: w, height: h }); await sleep(700);
   const bad = await page.evaluate(() => [...document.querySelectorAll('[tabindex]:not([tabindex="-1"]), button, [role=button]')].map((e) => { const r = e.getBoundingClientRect(); return { l: (e.getAttribute('aria-label') || e.textContent || '').slice(0, 14), r: r.toJSON(), vis: r.width > 0 }; })
     .filter((x) => x.vis && (x.r.left < -1 || x.r.top < -1 || x.r.right > innerWidth + 1 || x.r.bottom > innerHeight + 1)).map((x) => x.l));

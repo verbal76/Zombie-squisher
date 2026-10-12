@@ -1,6 +1,6 @@
 // Builds the desktop distribution from the shared source. Run from the repo root:
-//   node desktop/build.mjs --platform linux|win32 [--out dist-desktop] [--web-dir <existing web export>]
-// Output: <out>/ZombieSquisher-v<version>-<windows|linux>-x64.<zip|tar.gz> (+ .sha256), each containing a
+//   node desktop/build.mjs --platform linux|win32 [--build-number N] [--out dist-desktop] [--web-dir <existing web export>]
+// Output: <out>/Zombie Squisher Build N <EXE.zip|Linux.tar.gz> (studio naming; "Build dev" without --build-number) + .sha256, each containing a
 // BUILD-MANIFEST.json with the exact source SHA. It never publishes anything.
 import { execFileSync, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -12,6 +12,8 @@ const arg = (n, d) => { const i = process.argv.indexOf(`--${n}`); return i > 0 ?
 const platform = arg('platform');
 if (!['linux', 'win32'].includes(platform)) { console.error('usage: build.mjs --platform linux|win32'); process.exit(2); }
 const root = process.cwd();
+const { artifactName } = require(path.join(root, 'tools/release-names.js'));
+const buildNumber = arg('build-number') ? Number(arg('build-number')) : null;
 const outDir = path.resolve(arg('out', 'dist-desktop'));
 const sh = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', ...opts });
 const git = (c) => { try { return execSync(`git ${c}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } };
@@ -21,9 +23,10 @@ const version = app.version;
 const sha = process.env.GITHUB_SHA || git('rev-parse HEAD');
 if (!/^[0-9a-f]{40}$/.test(sha)) { console.error('cannot determine the source commit SHA'); process.exit(1); }
 const dirty = git('status --porcelain -- . ":!src/__generated__" ":!dist-desktop"') !== '';
-const env = { ...process.env, GITHUB_SHA: sha, BUILD_PLATFORM: platform === 'win32' ? 'windows' : 'linux' };
+const env = { ...process.env, GITHUB_SHA: sha, BUILD_PLATFORM: platform === 'win32' ? 'windows' : 'linux', ...(buildNumber ? { BUILD_NUMBER: String(buildNumber) } : {}) };
 const label = platform === 'win32' ? 'windows' : 'linux';
-const base = `ZombieSquisher-v${version}-${label}-x64`;
+const base = 'ZombieSquisher';                       // folder inside the archive (stable, no spaces)
+const archive = buildNumber ? artifactName(platform === 'win32' ? 'windows' : 'linux', buildNumber) : `Zombie Squisher Build dev ${platform === 'win32' ? 'EXE.zip' : 'Linux.tar.gz'}`;
 
 fs.rmSync(outDir, { recursive: true, force: true }); fs.mkdirSync(outDir, { recursive: true });
 const work = fs.mkdtempSync(path.join(outDir, '.work-'));
@@ -120,17 +123,16 @@ fs.writeFileSync(path.join(dist, 'README.txt'), readme);
 const { makeManifest } = require(path.join(root, 'tools/build-manifest.js'));
 const probe = path.join(work, 'probe.bin'); fs.writeFileSync(probe, sha);   // digest filled in after archiving
 const manifest = makeManifest({ artifact: probe, profile: 'desktop', buildInfoFile, env });
-manifest.platform = label; manifest.arch = 'x64'; manifest.dirtyTree = dirty; manifest.electron = require(path.join(root, 'desktop/node_modules/electron/package.json')).version;
+manifest.platform = label; manifest.arch = 'x64'; manifest.buildNumber = buildNumber; manifest.dirtyTree = dirty; manifest.electron = require(path.join(root, 'desktop/node_modules/electron/package.json')).version;
 manifest.runtimeVersion = app.version;
 fs.writeFileSync(path.join(dist, 'BUILD-MANIFEST.json'), JSON.stringify({ ...manifest, artifact: undefined, artifactSha256: undefined }, null, 2));
 
 // 6. archive
-const archive = platform === 'win32' ? `${base}.zip` : `${base}.tar.gz`;
 if (platform === 'win32') sh(`zip -qr -X "${path.join(outDir, archive)}" "${base}"`, { cwd: work });
 else sh(`tar --owner=0 --group=0 --numeric-owner -czf "${path.join(outDir, archive)}" "${base}"`, { cwd: work });
 const sha256 = execFileSync('sha256sum', [path.join(outDir, archive)], { encoding: 'utf8' }).split(' ')[0];
 fs.writeFileSync(path.join(outDir, `${archive}.sha256`), `${sha256}  ${archive}\n`);
 const full = { ...manifest, artifact: archive, artifactSha256: sha256 };
-fs.writeFileSync(path.join(outDir, `${base}.manifest.json`), JSON.stringify(full, null, 2));
+fs.writeFileSync(path.join(outDir, `${archive}.manifest.json`), JSON.stringify(full, null, 2));
 fs.rmSync(work, { recursive: true, force: true });
 console.log(`built ${archive}  sha256=${sha256}\nsource ${sha}${dirty ? ' (DIRTY working tree)' : ''}`);
