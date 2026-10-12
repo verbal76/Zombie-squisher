@@ -16,6 +16,8 @@ function check(archive, platform, root) {
   const base = 'ZombieSquisher';   // fixed folder name inside every desktop archive
   if (!has(new RegExp(`${base}/BUILD-MANIFEST\\.json$`))) errs.push('BUILD-MANIFEST.json missing');
   if (!has(new RegExp(`${base}/README\\.txt$`))) errs.push('README.txt missing');
+  if (!has(new RegExp(`${base}/THIRD_PARTY_NOTICES\\.md$`))) errs.push('THIRD_PARTY_NOTICES.md missing');
+  if (!has(new RegExp(`${base}/LICENSE\\.electron\\.txt$`))) errs.push('LICENSE.electron.txt missing');
   if (!has(/resources\/app\.asar$/)) errs.push('resources/app.asar missing');
   if (platform === 'linux') {
     const exec = (name) => listing.some((l) => l.endsWith(`${base}/${name}`) && /^-r[w-]x/.test(l));

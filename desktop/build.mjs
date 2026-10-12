@@ -81,6 +81,7 @@ if (platform === 'win32') {
 // 4. assemble the distributable folder
 const dist = path.join(work, base); fs.cpSync(pkgPath, dist, { recursive: true });
 fs.rmSync(path.join(dist, 'LICENSE'), { force: true });
+fs.copyFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), path.join(dist, 'THIRD_PARTY_NOTICES.md'));
 const electronLicense = path.join(pkgPath, 'LICENSE'); if (fs.existsSync(electronLicense)) fs.copyFileSync(electronLicense, path.join(dist, 'LICENSE.electron.txt'));
 if (platform === 'linux') {
   fs.writeFileSync(path.join(dist, 'ZombieSquisher.sh'),

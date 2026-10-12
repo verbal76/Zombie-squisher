@@ -103,3 +103,31 @@ test('unified build interface: build --platform android|windows|linux|all plans 
   assert.match(read('tools/build-android.sh'), /verify-apk\.sh/);
   assert.match(read('tools/build-android.sh'), /build-manifest\.js/);
 });
+
+test('third-party notices: committed file is current, covers every bundled package, and ships in the desktop packages', () => {
+  const list = JSON.parse(read('tools/notice-packages.json'));
+  const notices = read('THIRD_PARTY_NOTICES.md');
+  assert.ok(Object.keys(list).length >= 40);
+  for (const name of ['react', 'react-native', 'three', '@react-three/fiber', 'expo', 'react-native-web', 'zustand', 'upng-js']) assert.ok(name in list, `${name} is bundled and must be listed`);
+  for (const [name] of Object.entries(list)) {
+    const v = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', name, 'package.json'), 'utf8')).version;
+    assert.ok(notices.includes(`| ${name} | ${v} |`), `${name}@${v} missing from the notices summary`);
+  }
+  assert.match(notices, /Permission is hereby granted, free of charge/);
+  assert.doesNotMatch(notices, /Packages without a license file/, 'every bundled package must have a license text (own file or vendored upstream text with its source)');
+  const out = require('child_process').spawnSync('node', ['tools/generate-notices.mjs', '--check'], { cwd: root, encoding: 'utf8' });
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.match(read('desktop/build.mjs'), /THIRD_PARTY_NOTICES\.md/);
+  assert.match(read('tools/verify-desktop-package.js'), /THIRD_PARTY_NOTICES/);
+  const src = JSON.parse(read('tools/license-texts/sources.json'));
+  for (const [file, m] of Object.entries<any>(src)) {
+    assert.match(m.url, /^https:\/\/raw\.githubusercontent\.com\//);
+    assert.equal(require('crypto').createHash('sha256').update(fs.readFileSync(path.join(root, 'tools/license-texts', file))).digest('hex'), m.sha256, `${file} must match its recorded hash`);
+  }
+});
+
+test('asset provenance doc names the exact evidence gaps and what ships', () => {
+  const d = read('docs/THIRD_PARTY_ASSETS.md');
+  for (const needle of ['8b549ed', '9b31f8b', 'fb0bcec', 'UnityGLTF', 'hatchback-sports', 'colormap.png', 'character-a..r', 'NOT in the repository']) assert.ok(d.includes(needle), needle);
+  for (const f of ['hatchback-sports', 'sedan', 'taxi', 'ambulance']) assert.ok(fs.existsSync(path.join(root, 'assets', `${f}.glb`)));
+});

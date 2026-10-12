@@ -1,0 +1,20 @@
+{
+ "expo.LICENSE": {
+  "url": "https://raw.githubusercontent.com/expo/expo/main/LICENSE",
+  "retrieved": "2026-10-12",
+  "sha256": "fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4",
+  "note": "Upstream repository license; the npm packages that use it ship no license file of their own."
+ },
+ "react-native.LICENSE": {
+  "url": "https://raw.githubusercontent.com/facebook/react-native/main/LICENSE",
+  "retrieved": "2026-10-12",
+  "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+  "note": "Upstream repository license; the npm packages that use it ship no license file of their own."
+ },
+ "react-three-fiber.LICENSE": {
+  "url": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/master/LICENSE",
+  "retrieved": "2026-10-12",
+  "sha256": "9c35b5de7b7493a707fffe4eb23bd2f7f449153c1911f7c6eefb4e591fd5349a",
+  "note": "Upstream repository license; the npm packages that use it ship no license file of their own."
+ }
+}
