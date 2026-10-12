@@ -41,26 +41,10 @@ process.on('uncaughtException', (e) => log('uncaughtException', String(e && e.st
 // damaged by a crash). Every progress write is mirrored to <userData>/saves/progress.json with an atomic replace and a
 // .bak of the previous good copy; preload.js restores localStorage from it when the live copy is missing or corrupt.
 // Only progress is mirrored: settings and device preferences stay local (they must not roam between devices).
-const saveDir = () => path.join(app.getPath('userData'), 'saves');
-const saveFile = () => path.join(saveDir(), 'progress.json');
-const validSave = (o) => o && typeof o === 'object' && o.schema === 1 && o.keys && typeof o.keys === 'object';
-function readSave() {
-  for (const f of [saveFile(), saveFile() + '.bak']) {
-    try { const o = JSON.parse(fs.readFileSync(f, 'utf8')); if (validSave(o)) return o; } catch { /* missing or corrupt: try the backup */ }
-  }
-  return null;
-}
-function writeSave(key, value) {
-  if (typeof key !== 'string' || !/^zs:progress:/.test(key) || typeof value !== 'string' || value.length > 1_000_000) return;
-  try { JSON.parse(value); } catch { return; }                                  // never mirror a corrupt value over a good one
-  const cur = readSave() ?? { schema: 1, keys: {} };
-  cur.keys[key] = value; cur.savedAt = new Date().toISOString();
-  fs.mkdirSync(saveDir(), { recursive: true });
-  const tmp = saveFile() + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(cur));
-  try { if (fs.existsSync(saveFile())) fs.copyFileSync(saveFile(), saveFile() + '.bak'); } catch {}
-  fs.renameSync(tmp, saveFile());
-}
+const { createSaveMirror } = require('./saveMirror');
+const mirror = () => createSaveMirror(path.join(app.getPath('userData'), 'saves'));
+const readSave = () => mirror().read();
+const writeSave = (key, value) => mirror().write(key, value);
 
 // ---- app:// protocol ---------------------------------------------------------------------------------------------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',

@@ -43,7 +43,7 @@ const buildInfoFile = path.join(root, 'src/__generated__/build-info.ts');
 
 // 2. stage the shell
 const stage = path.join(work, 'stage'); fs.mkdirSync(stage, { recursive: true });
-for (const f of ['main.js', 'preload.js']) fs.copyFileSync(path.join(root, 'desktop', f), path.join(stage, f));
+for (const f of ['main.js', 'preload.js', 'saveMirror.js']) fs.copyFileSync(path.join(root, 'desktop', f), path.join(stage, f));
 fs.copyFileSync(path.join(root, 'assets/brand/icon.png'), path.join(stage, 'icon.png'));
 fs.cpSync(webDir, path.join(stage, 'game'), { recursive: true });
 fs.writeFileSync(path.join(stage, 'package.json'), JSON.stringify({ name: 'zombie-squisher', productName: 'Zombie Squisher', version, main: 'main.js', author: 'Hot Attic Games', description: 'Zombie Squisher' }, null, 2));

@@ -38,7 +38,7 @@ function check(archive, platform, root) {
     if (!/^[0-9a-f]{40}$/.test(m.sourceSha || '') || m.sourceSha !== m.commit) errs.push('manifest source SHA is missing or differs from the embedded commit');
     const asarBin = path.join(root, 'desktop/node_modules/@electron/asar/bin/asar.js');
     const files = execFileSync('node', [asarBin, 'list', path.join(tmp, base, 'resources/app.asar')], { encoding: 'utf8', maxBuffer: 1 << 28 }).split('\n');
-    for (const need of ['/main.js', '/preload.js', '/game/index.html']) if (!files.includes(need)) errs.push(`app.asar lacks ${need}`);
+    for (const need of ['/main.js', '/preload.js', '/saveMirror.js', '/game/index.html']) if (!files.includes(need)) errs.push(`app.asar lacks ${need}`);
     if (!files.some((f) => /\/game\/assets\/(.*\/)?audio\/.*\.wav$/.test(f))) errs.push('app.asar lacks the audio assets');
     if (!files.some((f) => /\/game\/assets\/.*\.glb$/.test(f))) errs.push('app.asar lacks the 3D vehicle models');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
