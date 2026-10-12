@@ -1,67 +1,103 @@
 name: Android APK (GitHub Runner)
 
+# MANUAL ONLY. Nothing here runs on push, merge, pull request, tag or version change.
+# Building and publishing are separate decisions:
+#   * Run it with publish=false (default) to build + verify + upload a development artifact. Nothing reaches players.
+#   * A GitHub Release is created only with publish=true AND confirm="PUBLISH-RELEASE", from the pipeline branch.
+# Run it from the Actions tab (Run workflow) or `gh workflow run`. See CLAUDE.md "Release authorization".
 on:
-  push:
-    branches:
-      - 'Github-build-pipeline-zombie-crusher'
-    paths-ignore:
-      - 'src/**'
-      - 'agentic docs/**'
-      - '**/*.md'
-      - '.github/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'tools/**'
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
-      profile:
-        description: 'EAS build profile (preview = APK, production = AAB)'
-        required: true
-        default: 'preview'
+      target:
+        description: 'apk = preview APK (+ emulator smoke), aab = production store bundle'
+        type: choice
+        options: [apk, aab]
+        default: apk
+      publish:
+        description: 'Publish a GitHub Release for this build (default: build only)'
+        type: boolean
+        default: false
+      confirm:
+        description: 'Type PUBLISH-RELEASE to authorize publishing (ignored unless publish is ticked)'
+        type: string
+        default: ''
+      smoke:
+        description: 'Run the emulator smoke test (apk only)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
 
 concurrency:
   group: android-build-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  RELEASE_BRANCH: Github-build-pipeline-zombie-crusher
+
 jobs:
-  # APK lane: build, verify (identity / signer / 16 KB), smoke-test on an emulator, name <Game>-v<version>.apk.
+  # Fails fast, before any build minutes are spent, when publishing was requested without authorization.
+  authorize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check publish authorization
+        env:
+          PUBLISH: ${{ inputs.publish }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$PUBLISH" = "true" ]; then
+            [ "$GITHUB_REF" = "refs/heads/$RELEASE_BRANCH" ] || { echo "::error::Publishing is only allowed from $RELEASE_BRANCH (this run is on $GITHUB_REF)"; exit 1; }
+            [ "$CONFIRM" = "PUBLISH-RELEASE" ] || { echo "::error::publish=true requires confirm=PUBLISH-RELEASE"; exit 1; }
+            echo "Release publishing authorized for $GITHUB_SHA"
+          else
+            echo "Build only: no release will be published."
+          fi
+
+  # APK lane: build, verify (identity / signer / 16 KB), optional emulator smoke, name <Game>-v<version>.apk.
   apk:
-    if: ${{ !startsWith(github.ref, 'refs/tags/') && (github.event.inputs.profile || 'preview') != 'production' }}
+    needs: authorize
+    if: ${{ inputs.target == 'apk' }}
     uses: ./.github/workflows/build-apk.yml
     with:
       profile: preview
+      run_smoke: ${{ inputs.smoke }}
     secrets:
       EXPO_TOKEN: ${{ secrets.ZOMBIE }}
 
   release-apk:
-    needs: apk
-    # Only the authoritative pipeline branch may publish a release (a manual dispatch from any other branch builds only).
-    if: ${{ github.ref == 'refs/heads/Github-build-pipeline-zombie-crusher' }}
+    needs: [authorize, apk]
+    if: ${{ inputs.publish && inputs.confirm == 'PUBLISH-RELEASE' && github.ref == 'refs/heads/Github-build-pipeline-zombie-crusher' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: ${{ needs.apk.outputs.artifact_name }}
           path: dist
+      - name: Verify release source (manifest, artifact and this run must agree)
+        run: node tools/verify-release-source.js dist/build-manifest.json "dist/${{ needs.apk.outputs.apk_name }}" "$GITHUB_SHA"
+      - name: Create the release tag on the built commit
+        run: tools/tag-release.sh "apk-build-${{ github.run_number }}" "$GITHUB_SHA"
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           tag_name: ${{ format('apk-build-{0}', github.run_number) }}
-          # Without this the new tag lands on the DEFAULT branch head, not the built commit (all apk-build-* tags before 77 do).
           target_commitish: ${{ github.sha }}
           name: "${{ format('{0} (build {1})', needs.apk.outputs.artifact_name, github.run_number) }}"
           prerelease: false
           make_latest: "true"
           generate_release_notes: true
+      - name: Confirm the published tag still resolves to the built commit
+        run: tools/tag-release.sh --check "apk-build-${{ github.run_number }}" "$GITHUB_SHA"
 
-  # Production lane (v* tags or manual dispatch with profile=production): store bundle (AAB).
+  # Production lane: store bundle (AAB). Built from any dispatch ref that is part of the release branch.
   aab:
-    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event.inputs.profile == 'production' }}
+    needs: authorize
+    if: ${{ inputs.target == 'aab' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -73,9 +109,9 @@ jobs:
           fetch-depth: 0
       - name: Source must be on the authoritative pipeline branch
         run: |
-          git fetch origin Github-build-pipeline-zombie-crusher
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/Github-build-pipeline-zombie-crusher \
-            || { echo "::error::$GITHUB_SHA is not part of Github-build-pipeline-zombie-crusher; refusing to build a store bundle from it"; exit 1; }
+          git fetch origin "$RELEASE_BRANCH"
+          git merge-base --is-ancestor "$GITHUB_SHA" "origin/$RELEASE_BRANCH" \
+            || { echo "::error::$GITHUB_SHA is not part of $RELEASE_BRANCH; refusing to build a store bundle from it"; exit 1; }
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -98,19 +134,40 @@ jobs:
       - run: node scripts/write-build-info.mjs
       - run: npm run prepare-assets
       - name: Build production bundle with EAS (local)
+        timeout-minutes: 60
         run: |
           mkdir -p build
           eas build --platform android --profile production --local --non-interactive --output build/raw.aab
-      - name: Name bundle
+      - name: Name bundle and record provenance
         id: name
         run: |
           NAME=$(node -p "require('./tools/apk-name.js').apkFileName(require('./app.json').expo).replace(/\.apk$/, '.aab')")
-          mv build/raw.aab "build/$NAME"
-          echo "file=build/$NAME" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@v2
+          mkdir -p dist && mv build/raw.aab "dist/$NAME"
+          node tools/build-manifest.js "dist/$NAME" production
+          echo "file=dist/$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p "require('./app.json').expo.version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
         with:
-          files: ${{ steps.name.outputs.file }}
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          name: aab-build-${{ github.run_number }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verify release source
+        if: ${{ inputs.publish }}
+        run: node tools/verify-release-source.js dist/build-manifest.json "${{ steps.name.outputs.file }}" "$GITHUB_SHA"
+      - name: Create the release tag on the built commit
+        if: ${{ inputs.publish }}
+        run: tools/tag-release.sh "aab-v${{ steps.name.outputs.version }}-build-${{ github.run_number }}" "$GITHUB_SHA"
+      - name: Publish store bundle release
+        if: ${{ inputs.publish }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          tag_name: ${{ format('aab-v{0}-build-{1}', steps.name.outputs.version, github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ format('v{0} store bundle (build {1})', steps.name.outputs.version, github.run_number) }}
           prerelease: false
           generate_release_notes: true
+      - name: Confirm the published tag still resolves to the built commit
+        if: ${{ inputs.publish }}
+        run: tools/tag-release.sh --check "aab-v${{ steps.name.outputs.version }}-build-${{ github.run_number }}" "$GITHUB_SHA"

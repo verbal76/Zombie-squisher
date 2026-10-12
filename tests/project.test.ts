@@ -100,10 +100,10 @@ test('GLB files are not compressed away: no-compress plugin present and uses and
   assert.match(plugin, /androidResources/);
 });
 
-test('OTA safety: only the legacy pipeline branch can publish, and package.json/app.json changes never OTA', () => {
+test('OTA safety: publishing is manual-only and tied to the app version as runtime (see provenance.test.ts for the triggers)', () => {
   const eas = read('.github/workflows/eas-update.yml');
-  assert.match(eas, /branches:\s*\n\s*- 'Github-build-pipeline-zombie-crusher'/);
-  for (const f of ['package.json', 'app.json', 'eas.json']) assert.ok(eas.includes(`- '${f}'`), f);
+  assert.match(eas, /^on:\s*\n\s+workflow_dispatch:/m);
+  assert.deepEqual(app.runtimeVersion, { policy: 'appVersion' });
 });
 
 test('no secrets, keystores or env files are tracked', () => {

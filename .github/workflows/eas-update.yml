@@ -1,37 +1,34 @@
 name: EAS Update (OTA)
 
+# MANUAL ONLY. An OTA reaches installed players, so it is never triggered by a push, merge, pull request, tag or
+# version change. To publish: Actions -> "EAS Update (OTA)" -> Run workflow on the pipeline branch, choose the
+# channel, and type PUBLISH-OTA in `confirm`. Nothing else in this repository can invoke `eas update`.
 on:
-  push:
-    branches:
-      - 'Github-build-pipeline-zombie-crusher'
-    paths-ignore:
-      - 'package.json'
-      - 'package-lock.json'
-      - 'app.json'
-      - 'eas.json'
-      - 'metro.config.js'
-      - 'babel.config.js'
-      - 'tsconfig.json'
-      - '.github/**'
-      - '**/*.md'
-      - 'agentic docs/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'tools/**'
   workflow_dispatch:
     inputs:
-      branch:
-        description: 'EAS update channel/branch (preview | production)'
-        required: true
-        default: 'preview'
+      channel:
+        description: 'EAS update channel/branch'
+        type: choice
+        options: [preview, production]
+        default: preview
       message:
-        description: 'Update message'
-        required: false
+        description: 'Update message (defaults to the commit subject)'
+        type: string
         default: ''
+      confirm:
+        description: 'Type PUBLISH-OTA to authorize publishing to players'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
 
 concurrency:
   group: eas-update-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
+
+env:
+  RELEASE_BRANCH: Github-build-pipeline-zombie-crusher
 
 jobs:
   update:
@@ -40,6 +37,13 @@ jobs:
     env:
       EXPO_TOKEN: ${{ secrets.ZOMBIE }}
     steps:
+      - name: Authorization
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          [ "$GITHUB_REF" = "refs/heads/$RELEASE_BRANCH" ] || { echo "::error::OTA may only be published from $RELEASE_BRANCH (this run is on $GITHUB_REF)"; exit 1; }
+          [ "$CONFIRM" = "PUBLISH-OTA" ] || { echo "::error::confirm must be PUBLISH-OTA to publish an OTA"; exit 1; }
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -47,6 +51,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Setup EAS
         uses: expo/expo-github-action@v8
@@ -57,6 +62,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Tests and typecheck (an OTA must not ship code that fails them)
+        run: npm run check
+
       - name: Generate build info
         run: node scripts/write-build-info.mjs
 
@@ -65,11 +73,10 @@ jobs:
 
       - name: Publish update
         env:
-          EXPO_TOKEN: ${{ secrets.ZOMBIE }}
+          CHANNEL: ${{ inputs.channel }}
+          MESSAGE: ${{ inputs.message }}
         run: |
-          BRANCH="${{ github.event.inputs.branch || 'preview' }}"
-          MSG="${{ github.event.inputs.message }}"
-          if [ -z "$MSG" ]; then
-            MSG="$(git log -1 --pretty=%B | head -n1)"
-          fi
-          eas update --non-interactive --branch "$BRANCH" --message "$MSG"
+          RT=$(node -p "require('./app.json').expo.version")
+          echo "Publishing OTA for runtime $RT (runtimeVersion policy appVersion), source $GITHUB_SHA, channel $CHANNEL"
+          if [ -z "$MESSAGE" ]; then MESSAGE="$(git log -1 --pretty=%s)"; fi
+          eas update --non-interactive --branch "$CHANNEL" --message "$MESSAGE [${GITHUB_SHA:0:7}]"

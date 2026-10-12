@@ -15,17 +15,22 @@ Built with Expo SDK 54 + React Native 0.81 + React 19 + three.js (react-three-fi
 
 ## Pipelines
 
-### 1. OTA updates — `.github/workflows/eas-update.yml`
-Auto-fires on every push to `Github-build-pipeline-zombie-crusher` (excluding readme/CI/config-only changes). Publishes the JS bundle to the EAS `preview` channel; installed apps with the matching `appVersion` pick it up on next launch. Manual dispatch lets you target the `production` channel instead.
+### Release authorization (nothing publishes automatically)
+A push, merge, pull request, tag, version bump or docs change never publishes anything. Building, merging and
+publishing are separate, explicit operations (Actions tab -> Run workflow):
 
-### 2. Native APK builds — `.github/workflows/android-build.yml`
-Runs `eas build --local` on the GitHub-hosted runner — **no EAS build minutes consumed**. Triggers:
+| Operation | Workflow | How |
+|---|---|---|
+| Fast checks | `ci.yml` | automatic on pull requests (skips docs-only) |
+| Development APK (never reaches players) | `android-candidate.yml` | manual; any branch; optional emulator smoke |
+| Release-line APK / store AAB build | `android-build.yml` | manual, `publish` unticked (default): builds, verifies, uploads a 14-day artifact |
+| Publish a GitHub Release | `android-build.yml` | manual on the pipeline branch, `publish` ticked **and** `confirm = PUBLISH-RELEASE` |
+| Publish an OTA | `eas-update.yml` | manual on the pipeline branch, choose channel, `confirm = PUBLISH-OTA` |
 
-- **Push to `Github-build-pipeline-zombie-crusher`** → APK with the `preview` profile, uploaded as a 90-day artifact on the run.
-- **`v*` tag push** → AAB with the `production` profile + an attached GitHub Release for permanent download.
-- **Manual dispatch** → pick the profile.
-
-Only secret required: `EXPO_TOKEN` (already configured).
+An OTA reaches only installs whose native runtime equals `app.json` `version` (policy `appVersion`); a change that needs
+native code or config needs a version bump and an APK/AAB, not an OTA. Release tags are created on the built commit and
+re-checked; the build manifest, the app and the run must report the same SHA or the release fails. Secret used: `EXPO_TOKEN`
+(stored as `ZOMBIE`).
 
 ## Local development
 

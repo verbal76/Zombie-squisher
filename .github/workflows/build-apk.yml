@@ -83,19 +83,7 @@ jobs:
           (cd dist && sha256sum "${{ steps.name.outputs.apk_name }}" | tee "${{ steps.name.outputs.apk_name }}.sha256")
           echo "Source SHA: $GITHUB_SHA"
       - name: Build manifest (provenance - exact source, version, toolchain, APK digest)
-        run: |
-          APK="dist/${{ steps.name.outputs.apk_name }}"
-          node -e '
-            const fs = require("fs");
-            const src = fs.readFileSync("src/__generated__/build-info.ts", "utf8");
-            const info = JSON.parse(src.slice(src.indexOf("BUILD_INFO: BuildInfo = ") + 24).replace(/;\s*$/, ""));
-            const m = { ...info, sourceSha: process.env.GITHUB_SHA, sourceRef: process.env.GITHUB_REF,
-              profile: "${{ inputs.profile }}", apk: process.argv[1].split("/").pop(),
-              apkSha256: fs.readFileSync(process.argv[1] + ".sha256", "utf8").split(" ")[0] };
-            if (m.sourceSha !== m.commit) throw new Error("build-info commit " + m.commit + " != GITHUB_SHA " + m.sourceSha);
-            fs.writeFileSync("dist/build-manifest.json", JSON.stringify(m, null, 2));
-          ' "$APK"
-          cat dist/build-manifest.json
+        run: node tools/build-manifest.js "dist/${{ steps.name.outputs.apk_name }}" "${{ inputs.profile }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.name.outputs.artifact_name }}

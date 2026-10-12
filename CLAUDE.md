@@ -22,8 +22,7 @@ verified artifact (reuse it); release validation for docs, comments or bookkeepi
 - `ci.yml` runs on **pull requests only**, skips docs-only changes, cancels superseded runs.
 - `build-apk.yml` (reusable) keeps every release gate: identity, signer fingerprint, target SDK, forbidden
   permissions, 16 KB alignment. Never weaken them to save minutes.
-- Pipeline branch (`Github-build-pipeline-zombie-crusher`): `eas-update.yml` (OTA) and `android-build.yml` (APK/release)
-  are path-filtered and must stay so. Merging into that branch publishes an OTA/release: owner authorisation required.
+- `eas-update.yml` (OTA) and `android-build.yml` (release/AAB) are **manual only**; see "Release authorization".
 - Batch changes and push once; do not push iteratively to "see what CI says". Reuse an existing artifact for a SHA.
 
 Never bypass signing, runtime/OTA compatibility, rollback protection or release gates to save minutes.
@@ -54,3 +53,19 @@ We develop ONE GAME that can have several build targets, never separate per-plat
 - **Don't silently skip:** CI may not pass by skipping required tests; missing toolchain pieces must fail visibly.
 - OTA compatibility: runtimeVersion follows the app version (`policy: appVersion`); changing native dependencies or
   config requires a version bump and a native build, not an OTA. Do not redesign this pipeline without a concrete defect.
+
+## Release authorization (permanent)
+
+Building, testing, merging and publishing are separate operations. **No push, merge, PR, tag, version or docs change may
+publish anything.**
+
+- `eas-update.yml` and `android-build.yml` have exactly one trigger, `workflow_dispatch`. Do not add `push`, `pull_request`,
+  `tags`, `release`, `schedule`, `workflow_run` or `workflow_call` triggers to them, and do not make any other workflow
+  call them or run `eas update` / create releases (`tests/provenance.test.ts` fails if you do).
+- Publishing an OTA needs: run on `Github-build-pipeline-zombie-crusher`, `confirm = PUBLISH-OTA`, tests green first.
+  Publishing a release needs: that branch, `publish` ticked, `confirm = PUBLISH-RELEASE`. Agents never dispatch these
+  without the owner's explicit instruction in the current conversation; a general "continue" is not authorization.
+- Release tags are created by `tools/tag-release.sh` on the built SHA and re-checked after publication; releases are
+  gated by `tools/verify-release-source.js` (manifest SHA == embedded commit == run SHA == artifact digest). Never move
+  or delete historical `apk-build-*` tags (see `docs/BRANCH_LEDGER.md`).
+- Development artifacts: `android-candidate.yml` or `android-build.yml` with `publish` unticked. They never reach players.

@@ -53,8 +53,8 @@ rewriting shared references, so they are left and this table is the record. Fixe
 
 ## Enforcement added
 
-- `release-apk` runs only for `refs/heads/Github-build-pipeline-zombie-crusher`; a dispatch from any other branch builds
-  but cannot publish.
+- Publishing is manual and typed-confirmed (`PUBLISH-RELEASE`, `PUBLISH-OTA`) on the pipeline branch only; no event
+  publishes. Release tags are created on the built SHA by `tools/tag-release.sh` and re-checked after publication.
 - The store-bundle (AAB) job refuses a commit that is not an ancestor of the pipeline branch.
 - Every APK ships `build-manifest.json` (source SHA, ref, version, runtime version, platform, profile, toolchain,
   timestamp, APK SHA-256) and the build fails if the embedded commit differs from `GITHUB_SHA`.
