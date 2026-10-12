@@ -3,16 +3,11 @@ import { GestureResponderEvent, StyleSheet, Text, View } from 'react-native';
 import { ControlLayout, HOLD_KINDS, TouchKind, TouchPoint, TouchTracker, classifyTouch } from '../game/controls';
 import { ControlBus } from '../game/controlBus';
 import { GearState } from '../game/engine';
+import { PadInput, applyHold, applyTap } from '../game/padState';
 import { colors, type } from '../ui/theme';
 
 /** Live input state read by the game loop every frame (mutated here, never re-created). */
-export interface ControlInput {
-  steerLeft: boolean;
-  steerRight: boolean;
-  turbo: boolean;
-  gear: GearState;
-  autoFire: boolean;
-}
+export type ControlInput = PadInput;
 
 const toPoints = (ts: ReadonlyArray<{ identifier: number; pageX: number; pageY: number }> | undefined): TouchPoint[] =>
   (ts ?? []).map((t) => ({ identifier: t.identifier, pageX: t.pageX, pageY: t.pageY }));
@@ -35,13 +30,13 @@ export function ControlPad({ layout, input, releaseSignal, bus }: Props) {
 
   const handlers = {
     onHold: (kind: TouchKind, on: boolean) => {
-      if (kind === 'steerLeft' || kind === 'steerRight' || kind === 'turbo') input.current[kind] = on;
+      applyHold(input.current, kind, on);
       setHeld((prev) => { const n = new Set(prev); if (on) n.add(kind); else n.delete(kind); return n; });
     },
     onTap: (kind: TouchKind) => {
-      if (kind === 'gearForward') { input.current.gear = 'forward'; setGear('forward'); }
-      else if (kind === 'gearReverse') { input.current.gear = 'reverse'; setGear('reverse'); }
-      else if (kind === 'gunsToggle') { const next = !input.current.autoFire; input.current.autoFire = next; setGuns(next); }
+      const changed = applyTap(input.current, kind);
+      if (changed.gear !== undefined) setGear(changed.gear);
+      if (changed.guns !== undefined) setGuns(changed.guns);
     },
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps

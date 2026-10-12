@@ -94,8 +94,31 @@ DENS=$(adb shell wm density | grep -o '[0-9]*' | tail -1)
 # landscape: wm size reports portrait dims on some images; normalise so W>H
 if [ "$W" -lt "$H" ]; then T=$W; W=$H; H=$T; fi
 RX=$(( W - (16+44)*DENS/160 )); RY=$(( H - (22+44)*DENS/160 ))
-adb shell input swipe "$RX" "$RY" "$RX" "$RY" 3000 &
-sleep 4; shot play-02; wait
+# Real injected touches must register in the ControlPad. The pad exposes its state through content-desc ("steerRight active"), so
+# these checks observe the product's own touch handling. They REPORT (OK / NOTE) rather than fail the run: a Game Over screen or a
+# slow emulator frame must not turn a valid build red, but a NOTE here is something to read in the log.
+touch_note() { echo "SMOKE NOTE: $*" | tee -a "$OUT/result.txt"; }
+adb shell input swipe "$RX" "$RY" "$RX" "$RY" 3500 &
+SWIPE=$!
+sleep 1.5
+dump
+if python3 tools/ui.py "$OUT/ui.xml" find "steerRight active" >/dev/null 2>&1; then ok "touch: a finger held on RIGHT registers (ControlPad reports steerRight active)"
+elif python3 tools/ui.py "$OUT/ui.xml" find "steerRight" >/dev/null 2>&1; then touch_note "touch: RIGHT is on screen but did NOT report active during a held finger - investigate"
+else touch_note "touch: ControlPad not on screen (run ended?) - hold not observable"; fi
+sleep 2; shot play-02; wait $SWIPE
+sleep 1; dump
+if python3 tools/ui.py "$OUT/ui.xml" find "steerRight active" >/dev/null 2>&1; then touch_note "touch: steerRight STILL active after the finger lifted - possible stuck input"
+elif python3 tools/ui.py "$OUT/ui.xml" find "steerRight" >/dev/null 2>&1; then ok "touch: releasing the finger releases steerRight"; fi
+# tap buttons: R (reverse gear), F (forward gear), GUNS toggle - each must change the on-screen state, then be restored
+tap_desc() { if xy=$(python3 tools/ui.py "$OUT/ui.xml" find "$1"); then adb shell input tap $xy; sleep 1; dump; return 0; fi; return 1; }
+if tap_desc "gearReverse"; then
+  python3 tools/ui.py "$OUT/ui.xml" find "gearReverse active" >/dev/null 2>&1 && ok "touch: tapping R selects reverse gear" || touch_note "touch: tapped R but gearReverse did not become active"
+  tap_desc "gearForward" >/dev/null 2>&1 || true
+fi
+if tap_desc "gunsToggle active"; then
+  python3 tools/ui.py "$OUT/ui.xml" find "gunsToggle active" >/dev/null 2>&1 && touch_note "touch: tapped GUNS but it stayed active" || ok "touch: tapping GUNS toggles it off"
+  tap_desc "gunsToggle" >/dev/null 2>&1 || true
+fi
 sleep 8; shot play-03
 adb shell dumpsys meminfo "$PKG" | grep -E "TOTAL|Graphics|Native Heap" | head -4 | tee "$OUT/meminfo.txt"
 

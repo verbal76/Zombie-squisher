@@ -6,7 +6,7 @@ import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
 import { World, createWorld, step, deriveStats } from '../game/engine';
 import { computeControlLayout } from '../game/controls';
-import { createControlBus } from '../game/controlBus';
+import { ControlBus, createControlBus } from '../game/controlBus';
 import { useDesktopGameInput } from '../platform/desktop';
 import { Diag } from '../debug/diagnostics';
 import { AudioDirector } from '../audio/audioDirector';
@@ -47,7 +47,9 @@ export function GameScreen({ progress, settings, onSettings, onEnd }: Props) {
   const insets = useSafeAreaInsets();
   const { width: sw, height: sh } = useWindowDimensions();
 
-  const controlBus = useRef(createControlBus()).current;   // desktop keyboard / gamepad (inert on touch-only builds)
+  const controlBusRef = useRef<ControlBus | null>(null);   // desktop keyboard / gamepad (inert on touch-only builds)
+  if (controlBusRef.current === null) controlBusRef.current = createControlBus();   // created once, not on every render
+  const controlBus = controlBusRef.current;
   const input = useRef<ControlInput>({ steerLeft: false, steerRight: false, turbo: false, gear: 'forward', autoFire: true });
   const abilityTrigger = useRef(false);
   const pausedRef = useRef(false);
