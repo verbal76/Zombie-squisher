@@ -1,6 +1,7 @@
 import React, { MutableRefObject, useEffect, useMemo, useState } from 'react';
 import { GestureResponderEvent, StyleSheet, Text, View } from 'react-native';
 import { ControlLayout, HOLD_KINDS, TouchKind, TouchPoint, TouchTracker, classifyTouch } from '../game/controls';
+import { ControlBus } from '../game/controlBus';
 import { GearState } from '../game/engine';
 import { colors, type } from '../ui/theme';
 
@@ -23,25 +24,30 @@ interface Props {
   input: MutableRefObject<ControlInput>;
   /** Bump to release every held button (pause, About, interruptions). */
   releaseSignal: number;
+  /** Optional extra input source (keyboard / gamepad on the desktop build) that drives the same handlers as touch. */
+  bus?: ControlBus;
 }
 
-export function ControlPad({ layout, input, releaseSignal }: Props) {
+export function ControlPad({ layout, input, releaseSignal, bus }: Props) {
   const [held, setHeld] = useState<ReadonlySet<TouchKind>>(new Set());
   const [gear, setGear] = useState<GearState>(input.current.gear);
   const [guns, setGuns] = useState(input.current.autoFire);
 
-  const tracker = useMemo(() => new TouchTracker(layout, {
-    onHold: (kind, on) => {
+  const handlers = {
+    onHold: (kind: TouchKind, on: boolean) => {
       if (kind === 'steerLeft' || kind === 'steerRight' || kind === 'turbo') input.current[kind] = on;
       setHeld((prev) => { const n = new Set(prev); if (on) n.add(kind); else n.delete(kind); return n; });
     },
-    onTap: (kind) => {
+    onTap: (kind: TouchKind) => {
       if (kind === 'gearForward') { input.current.gear = 'forward'; setGear('forward'); }
       else if (kind === 'gearReverse') { input.current.gear = 'reverse'; setGear('reverse'); }
       else if (kind === 'gunsToggle') { const next = !input.current.autoFire; input.current.autoFire = next; setGuns(next); }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), []);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tracker = useMemo(() => new TouchTracker(layout, handlers), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => (bus ? bus.subscribe(handlers) : undefined), [bus]);
 
   useEffect(() => { tracker.setLayout(layout); }, [tracker, layout]);
   useEffect(() => { if (releaseSignal > 0) tracker.releaseAll(); }, [tracker, releaseSignal]);

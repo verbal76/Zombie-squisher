@@ -6,6 +6,8 @@ import { VEHICLES } from '../data/vehicles';
 import { ABILITIES } from '../data/weapons';
 import { World, createWorld, step, deriveStats } from '../game/engine';
 import { computeControlLayout } from '../game/controls';
+import { createControlBus } from '../game/controlBus';
+import { useDesktopGameInput } from '../platform/desktop';
 import { Diag } from '../debug/diagnostics';
 import { AudioDirector } from '../audio/audioDirector';
 import { createExpoAudioBackend } from '../audio/expoAudioBackend';
@@ -45,6 +47,7 @@ export function GameScreen({ progress, settings, onSettings, onEnd }: Props) {
   const insets = useSafeAreaInsets();
   const { width: sw, height: sh } = useWindowDimensions();
 
+  const controlBus = useRef(createControlBus()).current;   // desktop keyboard / gamepad (inert on touch-only builds)
   const input = useRef<ControlInput>({ steerLeft: false, steerRight: false, turbo: false, gear: 'forward', autoFire: true });
   const abilityTrigger = useRef(false);
   const pausedRef = useRef(false);
@@ -143,6 +146,14 @@ export function GameScreen({ progress, settings, onSettings, onEnd }: Props) {
   }, []);
 
   const w = worldRef.current!;
+  useDesktopGameInput({
+    bus: controlBus,
+    active: !paused && !aboutOpen && !w.gameOver,
+    paused,
+    onAbility: () => { if (!pausedRef.current) abilityTrigger.current = true; },
+    onPause: () => setPaused(true),
+    onResume: () => { directorRef.current?.click(); setPaused(false); },
+  });
   const debug = SHOW_DEBUG ? [
     `hd=${(w.heading * 180 / Math.PI).toFixed(0)}°  vF=${w.forwardV.toFixed(0)}  ω=${w.angularVelocity.toFixed(2)}`,
     `L=${+input.current.steerLeft}  R=${+input.current.steerRight}  gear=${input.current.gear}  turbo=${+input.current.turbo}  guns=${+input.current.autoFire}`,
@@ -163,7 +174,7 @@ export function GameScreen({ progress, settings, onSettings, onEnd }: Props) {
         onAbout={() => { setPaused(true); setAboutOpen(true); }}
         onAbility={() => { if (!pausedRef.current) abilityTrigger.current = true; }}
       />
-      <ControlPad layout={layout} input={input} releaseSignal={releaseSignal} />
+      <ControlPad layout={layout} input={input} releaseSignal={releaseSignal} bus={controlBus} />
       {paused && !aboutOpen && !w.gameOver && (
         <PauseOverlay
           settings={settings}

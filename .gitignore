@@ -29,3 +29,9 @@ yarn.lock
 # so the build scripts (zombify-character-textures, embed-zombie-textures,
 # encode-glb-to-ts) can be re-run.
 assets/characters/
+
+# Desktop shell
+desktop/node_modules/
+dist-desktop/
+dist-linux/
+dist-windows/

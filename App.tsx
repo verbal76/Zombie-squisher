@@ -18,8 +18,10 @@ import { GarageScreen } from './src/components/GarageScreen';
 import { GameOverScreen } from './src/components/GameOverScreen';
 import { HagSplash, SPLASH_BG } from './src/components/HagSplash';
 import { installGlobalErrorHandler } from './src/debug/diagnostics';
+import { installDesktopShell } from './src/platform/desktop';
 
 installGlobalErrorHandler();
+installDesktopShell();   // keyboard / gamepad / menu focus on the Windows, Linux and Steam Deck builds; no-op on Android
 
 // Keep the (background-colour-only) native splash up until the branded screen has laid out.
 SplashScreen.preventAutoHideAsync().catch(() => {});
