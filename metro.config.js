@@ -1,10 +1,4 @@
-// Metro config bump only -- fires android-build workflow so a fresh
-// APK ships the latest src/** state (GUNS on/off toggle button above
-// the LEFT arrow, side-impact damage rule, per-hit horde slowdown).
-// No source changes in this commit.
-//
-// 2026-05-13n: APK trigger for GUNS toggle button + side-hit damage
-// + per-hit slowdown.
+// Metro configuration. (Older revisions bumped this file to trigger APK builds on push; builds are manual now, see CLAUDE.md.)
 
 const { getDefaultConfig } = require('expo/metro-config');
 

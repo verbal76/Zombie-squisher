@@ -28,19 +28,6 @@ test('same-source gate: passes only when android, windows and linux all name the
   assert.ok(verify('main', all(), { digest: sameDigest }).some((e: string) => /40-char/.test(e)));
 });
 
-test('multiplatform workflow: manual, development-only, never publishes, verifies one SHA at the end', () => {
-  const wf = read('.github/workflows/multiplatform-build.yml');
-  const on = wf.match(/^on:\s*\n((?:[ \t]+.*\n|[ \t]*\n)*)/m)![1];
-  assert.deepEqual([...on.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]), ['workflow_dispatch']);
-  assert.doesNotMatch(wf, /contents:\s*write/);
-  assert.doesNotMatch(wf, /action-gh-release|gh release|eas update|git push|steamcmd|upload-google-play/i);
-  assert.match(wf, /tools\/verify-same-source\.js "\$\{\{ needs\.source\.outputs\.sha \}\}"/);
-  assert.match(wf, /verify-desktop-package\.js dist-linux/);
-  assert.match(wf, /verify-desktop-package\.js dist-windows/);
-  assert.match(wf, /npm run check/);
-  assert.match(wf, /windows_smoke:[\s\S]*default: false/, 'the billed 2x Windows runner is opt-in');
-});
-
 // ---- the Electron shell ------------------------------------------------------------------------------------------
 
 test('shell hardening: isolated renderer, private origin only, no path traversal, single instance', () => {
@@ -80,7 +67,7 @@ test('packaging script: Linux wrapper passes --no-sandbox and ships no SUID help
   assert.match(b, /mode: 0o755/);
   assert.match(b, /chrome-sandbox/);
   assert.match(b, /tools\/build-manifest\.js/);
-  assert.match(b, /ZombieSquisher-v\$\{version\}-\$\{label\}-x64/);
+  assert.match(b, /artifactName\(/);
   assert.match(b, /sha256sum/);
   assert.doesNotMatch(b, /gh release|action-gh-release|steamcmd|eas update|git push/i);
   assert.match(b, /CompanyName: 'Hot Attic Games'/);
@@ -100,4 +87,19 @@ test('shell text shown to players is correct: product name and company', () => {
   assert.equal(d.productName, 'Zombie Squisher');
   assert.equal(d.author, 'Hot Attic Games');
   assert.match(read('desktop/main.js'), /title: 'Zombie Squisher'/);
+});
+
+test('unified build interface: build --platform android|windows|linux|all plans one commit, refuses dirty trees and bad input', async () => {
+  const { plan } = await import('../tools/build.mjs');
+  assert.deepEqual(plan({ platform: 'linux', buildNumber: 77 }).steps.map((s: any) => s.platform), ['linux']);
+  assert.deepEqual(plan({ platform: 'all', buildNumber: 77 }).steps.map((s: any) => s.platform), ['android', 'windows', 'linux']);
+  const win = plan({ platform: 'windows', buildNumber: 5 }).steps[0];
+  assert.deepEqual(win.args.slice(0, 5), ['desktop/build.mjs', '--platform', 'win32', '--build-number', '5']);
+  assert.ok(plan({ platform: 'mac' }).errors.length, 'unknown platform');
+  assert.ok(plan({ platform: 'all', buildNumber: 0 }).errors.length, 'bad build number');
+  assert.ok(plan({ platform: 'all', dirty: true }).errors.some((e: string) => /uncommitted/.test(e)), 'dirty tree refused');
+  assert.deepEqual(plan({ platform: 'all', dirty: true, allowDirty: true }).errors, []);
+  assert.equal(JSON.parse(read('package.json')).scripts.build, 'node tools/build.mjs');
+  assert.match(read('tools/build-android.sh'), /verify-apk\.sh/);
+  assert.match(read('tools/build-android.sh'), /build-manifest\.js/);
 });

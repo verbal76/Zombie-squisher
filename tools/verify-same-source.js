@@ -16,7 +16,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-function verify(expectedSha, manifests, { required = ['android', 'windows', 'linux'], digest = () => null } = {}) {
+function verify(expectedSha, manifests, { required = ['android', 'windows', 'linux'], digest = () => null, buildNumber = null } = {}) {
   const errs = [];
   if (!/^[0-9a-f]{40}$/.test(expectedSha || '')) errs.push(`expected SHA is not a 40-char commit: "${expectedSha}"`);
   const seen = new Map();
@@ -25,6 +25,7 @@ function verify(expectedSha, manifests, { required = ['android', 'windows', 'lin
     if (!plat) { errs.push(`${file}: manifest has no platform`); continue; }
     if (m.sourceSha !== expectedSha) errs.push(`${plat}: sourceSha ${m.sourceSha} != ${expectedSha}`);
     if (m.commit !== expectedSha) errs.push(`${plat}: embedded commit ${m.commit} != ${expectedSha}`);
+    if (buildNumber !== null && m.buildNumber !== buildNumber) errs.push(`${plat}: build number ${m.buildNumber} != ${buildNumber}`);
     if (m.dirtyTree === true || m.dirty === true) errs.push(`${plat}: built from a dirty working tree`);
     if (seen.has(plat)) errs.push(`${plat}: more than one manifest (${seen.get(plat)} and ${file})`);
     seen.set(plat, file);
@@ -38,7 +39,11 @@ function verify(expectedSha, manifests, { required = ['android', 'windows', 'lin
   return errs;
 }
 
-module.exports = { verify, walk };
+function findManifests(files) {
+  return files.filter((f) => /(^|\/)(build-manifest\.json|[^/]+\.manifest\.json)$/.test(f)).map((f) => ({ file: f, m: JSON.parse(fs.readFileSync(f, 'utf8')) })).filter(({ m }) => m.platform && m.platform !== 'android-aab');
+}
+
+module.exports = { verify, walk, findManifests };
 
 if (require.main === module) {
   const args = process.argv.slice(2);
@@ -47,7 +52,7 @@ if (require.main === module) {
   const [sha, out, ...dirs] = args.filter((a, i) => a !== '--require' && (ri < 0 || i !== ri + 1));
   if (!sha || !out || dirs.length === 0) { console.error('usage: verify-same-source.js <sha> <out.json> <dir>... [--require android,linux]'); process.exit(2); }
   const files = dirs.flatMap((d) => walk(d));
-  const manifests = files.filter((f) => /(^|\/)(build-manifest\.json|[^/]+\.manifest\.json)$/.test(f)).map((f) => ({ file: f, m: JSON.parse(fs.readFileSync(f, 'utf8')) }));
+  const manifests = findManifests(files);
   const digest = (m, file) => {
     const art = files.find((f) => path.basename(f) === m.artifact && path.dirname(f) === path.dirname(file));
     return art ? crypto.createHash('sha256').update(fs.readFileSync(art)).digest('hex') : null;

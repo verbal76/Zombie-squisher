@@ -1,0 +1,304 @@
+name: Build (Android / Windows / Linux)
+
+# THE primary build workflow (Hot Attic Games master standard, sections 5-9). MANUAL ONLY: nothing pushes, merges,
+# tags or version-bumps into it. Running it IS the owner's authorization for exactly the platforms and destination
+# chosen below; it authorizes nothing else (no OTA, no Steam, no Google Play, no merges).
+#   destination = local_only       build + verify + keep the files as run artifacts (14 days). Any branch.
+#   destination = github_releases  also publish ONE GitHub Release "Zombie Squisher Build NN" with the standard-named
+#                                  files, build-manifest.json and checksums.sha256. Source must be in the release
+#                                  branch lineage.
+# All selected platforms are built from the one commit this run is dispatched on; source_sha must equal it.
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Which platform(s) to build'
+        type: choice
+        options: [all, android, windows, linux]
+        default: all
+      source_sha:
+        description: 'Exact approved commit (40-char SHA); the run fails unless the dispatched ref is at this commit'
+        type: string
+        required: true
+      build_number:
+        description: 'Coordinated build number (above every number used so far; never reused)'
+        type: string
+        required: true
+      destination:
+        description: 'local_only keeps run artifacts; github_releases publishes one GitHub Release'
+        type: choice
+        options: [local_only, github_releases]
+        default: local_only
+      android_smoke:
+        description: 'Android emulator smoke test (~5 min extra)'
+        type: boolean
+        default: false
+      windows_smoke:
+        description: 'Run the Windows build on a windows-latest runner (billed 2x)'
+        type: boolean
+        default: false
+      android_aab:
+        description: 'Also build the Android App Bundle (artifact only; not part of the release)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_BRANCH: Github-build-pipeline-zombie-crusher
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      sha: ${{ steps.v.outputs.sha }}
+      build: ${{ steps.v.outputs.build }}
+      android: ${{ steps.v.outputs.android }}
+      windows: ${{ steps.v.outputs.windows }}
+      linux: ${{ steps.v.outputs.linux }}
+      require: ${{ steps.v.outputs.require }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - id: v
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          PLATFORM: ${{ inputs.platform }}
+          DESTINATION: ${{ inputs.destination }}
+        run: |
+          set -e
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::source_sha must be a full 40-character commit SHA"; exit 1; }
+          [ "$(git rev-parse HEAD)" = "$SOURCE_SHA" ] || { echo "::error::source_sha $SOURCE_SHA is not the commit this run was dispatched on ($(git rev-parse HEAD)). Dispatch on the branch/tag at that commit."; exit 1; }
+          [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "::error::build_number must be a positive integer"; exit 1; }
+          git fetch --tags --force origin
+          git fetch origin "$RELEASE_BRANCH"
+          node tools/release-names.js validate "$BUILD_NUMBER" "$(git tag -l | tr '\n' ' ')"
+          if [ "$DESTINATION" = "github_releases" ]; then
+            git merge-base --is-ancestor "$SOURCE_SHA" "origin/$RELEASE_BRANCH" || { echo "::error::releases may only be built from commits in the $RELEASE_BRANCH lineage; $SOURCE_SHA is not. Merge first (merging publishes nothing), or use destination=local_only."; exit 1; }
+          else
+            [ -n "$(git branch -r --contains "$SOURCE_SHA")" ] || { echo "::error::$SOURCE_SHA is not on any remote branch"; exit 1; }
+          fi
+          A=false; W=false; L=false; REQ=""
+          case "$PLATFORM" in all) A=true; W=true; L=true;; android) A=true;; windows) W=true;; linux) L=true;; esac
+          [ $A = true ] && REQ="$REQ,android"; [ $W = true ] && REQ="$REQ,windows"; [ $L = true ] && REQ="$REQ,linux"
+          { echo "sha=$SOURCE_SHA"; echo "build=$BUILD_NUMBER"; echo "android=$A"; echo "windows=$W"; echo "linux=$L"; echo "require=${REQ#,}"; } >> "$GITHUB_OUTPUT"
+          echo "Plan: build $BUILD_NUMBER from $SOURCE_SHA for ${REQ#,} -> $DESTINATION"
+      - run: npm ci
+      - name: Shared gameplay, input, provenance and authorization tests (once, for all platforms)
+        run: npm run check
+
+  android:
+    needs: plan
+    if: ${{ needs.plan.outputs.android == 'true' }}
+    uses: ./.github/workflows/build-apk.yml
+    with:
+      profile: preview
+      run_smoke: ${{ inputs.android_smoke }}
+      build_number: ${{ needs.plan.outputs.build }}
+    secrets:
+      EXPO_TOKEN: ${{ secrets.ZOMBIE }}
+
+  aab:
+    # Preserved capability (no Google Play upload is ever performed here): an App Bundle for the owner, as a run artifact.
+    needs: plan
+    if: ${{ inputs.android_aab }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      EXPO_TOKEN: ${{ secrets.ZOMBIE }}
+      BUILD_NUMBER: ${{ needs.plan.outputs.build }}
+      BUILD_PLATFORM: android-aab
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK (preinstalled on the runner image; accept licences so Gradle can fetch build-tools/NDK)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" | tail -3
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.ZOMBIE }}
+      - run: npm ci
+      - run: node scripts/write-build-info.mjs
+      - run: npm run prepare-assets
+      - name: Build production bundle with EAS (local)
+        timeout-minutes: 60
+        run: |
+          mkdir -p build dist
+          eas build --platform android --profile production --local --non-interactive --output build/raw.aab
+          NAME="Zombie Squisher Build $BUILD_NUMBER AAB.aab"
+          mv build/raw.aab "dist/$NAME"
+          node tools/build-manifest.js "dist/$NAME" production
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aab-${{ needs.plan.outputs.build }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  desktop:
+    needs: plan
+    if: ${{ needs.plan.outputs.windows == 'true' || needs.plan.outputs.linux == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pillow
+      - run: npm ci
+      - run: npm ci --prefix desktop
+      - name: Build Linux x86-64 (tar.gz)
+        if: ${{ needs.plan.outputs.linux == 'true' }}
+        run: |
+          node desktop/build.mjs --platform linux --build-number "${{ needs.plan.outputs.build }}" --out dist-linux
+          node tools/verify-desktop-package.js dist-linux/*.tar.gz linux dist-linux/*.tar.gz.sha256
+      - name: Smoke-test the packaged Linux build (menus, gamepad, play, pause, focus loss, saves, restart, clean quit)
+        if: ${{ needs.plan.outputs.linux == 'true' }}
+        run: |
+          set -e
+          mkdir -p smoke-linux x && tar -xzf dist-linux/*.tar.gz -C x
+          D=x/ZombieSquisher
+          (xvfb-run -a -s "-screen 0 1280x800x24" env HAG_SOFTWARE_GL=1 "$D/ZombieSquisher.sh" --remote-debugging-port=9222 --windowed > smoke-linux/electron.log 2>&1 &)
+          for i in $(seq 1 60); do curl -s http://127.0.0.1:9222/json/version >/dev/null && break; sleep 1; done
+          node tools/desktop-smoke.mjs --cdp http://127.0.0.1:9222 --out smoke-linux
+          sleep 3; pkill -f "[z]ombie-squisher-bin" || true
+          node tools/desktop-restart-test.mjs --dist "$D" --home "$RUNNER_TEMP/restart-home"
+      - name: Build Windows x64 (zip, cross-packaged; executable resources branded with resedit)
+        if: ${{ needs.plan.outputs.windows == 'true' }}
+        run: |
+          node desktop/build.mjs --platform win32 --build-number "${{ needs.plan.outputs.build }}" --out dist-windows
+          node tools/verify-desktop-package.js dist-windows/*.zip windows dist-windows/*.zip.sha256
+      - uses: actions/upload-artifact@v4
+        if: ${{ needs.plan.outputs.linux == 'true' }}
+        with:
+          name: part-linux
+          path: dist-linux/*
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: ${{ needs.plan.outputs.windows == 'true' }}
+        with:
+          name: part-windows
+          path: dist-windows/*
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always() && needs.plan.outputs.linux == 'true'
+        with:
+          name: smoke-linux-${{ needs.plan.outputs.build }}
+          path: smoke-linux/
+          retention-days: 14
+
+  windows-smoke:
+    needs: [plan, desktop]
+    if: ${{ needs.plan.outputs.windows == 'true' && inputs.windows_smoke }}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: part-windows
+          path: dist-windows
+      - name: Run ZombieSquisher.exe and drive it (menus, gamepad, play, pause, focus loss)
+        env:
+          HAG_SOFTWARE_GL: '1'
+        run: |
+          mkdir -p smoke-windows x && unzip -q dist-windows/*.zip -d x
+          ("x/ZombieSquisher/ZombieSquisher.exe" --remote-debugging-port=9222 --windowed > smoke-windows/electron.log 2>&1 &)
+          for i in $(seq 1 60); do curl -s http://127.0.0.1:9222/json/version >/dev/null && break; sleep 1; done
+          node tools/desktop-smoke.mjs --cdp http://127.0.0.1:9222 --out smoke-windows
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-windows-${{ needs.plan.outputs.build }}
+          path: smoke-windows/
+          retention-days: 14
+
+  assemble:
+    # Proves one source SHA + one build number across every selected platform, then lays the files out under the
+    # studio names with build-manifest.json and checksums.sha256.
+    needs: [plan, android, desktop, windows-smoke]
+    if: ${{ always() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: parts
+      - name: Same source SHA, same build number, platforms present, digests recomputed
+        run: node tools/assemble-release.js --sha "${{ needs.plan.outputs.sha }}" --build "${{ needs.plan.outputs.build }}" --require "${{ needs.plan.outputs.require }}" --out release parts
+      - run: cat release/build-manifest.json release/checksums.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files-${{ needs.plan.outputs.build }}
+          path: release/*
+          retention-days: 14
+
+  publish:
+    # Only for destination=github_releases. Creates immutable tag build-NN on the built commit, then ONE release.
+    needs: [plan, assemble]
+    if: ${{ inputs.destination == 'github_releases' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files-${{ needs.plan.outputs.build }}
+          path: release
+      - name: Tag the built commit (immutable build-NN)
+        run: tools/tag-release.sh "build-${{ needs.plan.outputs.build }}" "${{ needs.plan.outputs.sha }}"
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ needs.plan.outputs.build }}
+          target_commitish: ${{ needs.plan.outputs.sha }}
+          name: Zombie Squisher Build ${{ needs.plan.outputs.build }}
+          files: release/*
+          prerelease: true
+          make_latest: false
+          generate_release_notes: false
+          body: |
+            Zombie Squisher Build ${{ needs.plan.outputs.build }}
+            Source commit `${{ needs.plan.outputs.sha }}`. Platforms: ${{ needs.plan.outputs.require }}${{ inputs.platform != 'all' && ' (PARTIAL build: not a complete three-platform release)' || '' }}.
+            Checksums: `checksums.sha256`. Provenance: `build-manifest.json`.
+      - name: Confirm the published tag still resolves to the built commit
+        run: tools/tag-release.sh --check "build-${{ needs.plan.outputs.build }}" "${{ needs.plan.outputs.sha }}"

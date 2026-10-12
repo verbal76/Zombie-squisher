@@ -12,6 +12,9 @@ on:
       run_smoke:
         type: boolean
         default: true
+      build_number:
+        type: string
+        default: ''
     secrets:
       EXPO_TOKEN:
         required: true
@@ -58,6 +61,8 @@ jobs:
       - name: Checks
         run: npm run check
       - name: Generate build info
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
         run: node scripts/write-build-info.mjs
       - name: Brand assets
         run: npm run prepare-assets
