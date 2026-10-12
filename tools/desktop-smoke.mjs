@@ -122,6 +122,54 @@ await page.keyboard.down('ArrowRight'); await sleep(300); check(await active('st
 await page.keyboard.up('ArrowRight'); await sleep(250);
 await page.keyboard.down('Shift'); await sleep(300); check(await active('turbo active'), 'keyboard: Shift is turbo'); await page.keyboard.up('Shift'); await sleep(250);
 
+// ---- touch: the SAME ControlPad component Android uses, driven by real multi-touch events (CDP) ----
+// (RN-web feeds the pad's responder with touch identifiers and page coordinates, exactly the data the Android responder gives it.)
+const cdp = await ctx.newCDPSession(page);
+await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+const centreOf = (label) => page.evaluate((l) => { const e = document.querySelector(`[aria-label^="${l}"]`); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, label);
+// touchStart/touchMove carry every finger that is down; touchEnd carries the fingers that were LIFTED (empty = all lifted).
+// Real fingers jitter, which produces move events after any start; `jitter` adds that so a second finger is reported to the responder.
+const touch = async (type, pts) => { try { await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p.x, y: p.y, id: p.id ?? i + 1 })) }); } catch (e) { if (!/Must send a TouchStart/.test(String(e))) throw e; } };
+const jitter = async (pts) => { await touch('touchMove', pts.map((p) => ({ ...p, x: p.x + 0.5 }))); await touch('touchMove', pts); };
+const L = await centreOf('steerLeft'), R = await centreOf('steerRight'), T = await centreOf('turbo'), RV = await centreOf('gearReverse'), FW = await centreOf('gearForward'), GN = await centreOf('gunsToggle');
+check(!!(L && R && T && RV && FW && GN), 'touch: all six on-screen pad buttons exist');
+if (L && R && T && RV && FW && GN) {
+  await touch('touchStart', [{ ...L, id: 1 }]); await frames(4);
+  check(await active('steerLeft active'), 'touch: a finger down on LEFT steers left');
+  await touch('touchEnd', []); await frames(4);
+  check(!(await active('steerLeft active')), 'touch: lifting the finger releases LEFT');
+  await touch('touchStart', [{ ...R, id: 1 }]); await frames(3);
+  await touch('touchStart', [{ ...R, id: 1 }, { ...T, id: 2 }]); await jitter([{ ...R, id: 1 }, { ...T, id: 2 }]); await frames(4);
+  check((await active('steerRight active')) && (await active('turbo active')), 'touch: two fingers hold RIGHT + TURBO together (multi-touch)');
+  await touch('touchEnd', [{ ...R, id: 1 }]); await frames(4);          // lift RIGHT only; TURBO's finger stays down and does not move
+  check(!(await active('steerRight active')) && (await active('turbo active')), 'touch: lifting one finger releases only its button (the other finger stays held, even without moving)');
+  await touch('touchEnd', []); await frames(4);
+  check(!(await active('turbo active')), 'touch: lifting the last finger releases everything');
+  await touch('touchStart', [{ ...RV, id: 1 }]); await touch('touchEnd', []); await frames(4);
+  check(await active('gearReverse active'), 'touch: tapping R selects reverse');
+  await touch('touchStart', [{ ...FW, id: 1 }]); await touch('touchEnd', []); await frames(4);
+  check(await active('gearForward active'), 'touch: tapping F selects forward');
+  const gunsOn = await active('gunsToggle active');
+  await touch('touchStart', [{ ...GN, id: 1 }]); await touch('touchEnd', []); await frames(4);
+  check((await active('gunsToggle active')) !== gunsOn, 'touch: tapping GUNS toggles it');
+  await touch('touchStart', [{ ...GN, id: 1 }]); await touch('touchEnd', []); await frames(4);
+  // hold two buttons, then pause with the HUD pause button: nothing may stay held, and the pad works again after resume
+  await touch('touchStart', [{ ...L, id: 1 }]); await touch('touchStart', [{ ...L, id: 1 }, { ...T, id: 2 }]); await jitter([{ ...L, id: 1 }, { ...T, id: 2 }]); await frames(4);
+  const pauseBtn = await page.evaluate(() => { const e = [...document.querySelectorAll('[role=button],[tabindex="0"]')].find((x) => (x.textContent || '').trim() === '❚❚'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  if (pauseBtn) {
+    await touch('touchEnd', []); await touch('touchStart', [{ ...pauseBtn, id: 3 }]); await touch('touchEnd', []); await frames(6);
+    check(await waitFor(() => has('PAUSED'), 3000), 'touch: the HUD pause button pauses');
+    check(!(await active('steerLeft active')) && !(await active('turbo active')), 'touch: nothing stays held across a pause');
+    await press('START'); await waitFor(async () => !(await has('PAUSED')), 3000);
+    const L2 = await centreOf('steerLeft');
+    await touch('touchStart', [{ ...L2, id: 1 }]); await frames(4);
+    check(await active('steerLeft active'), 'touch: the pad works again after resume');
+    await touch('touchEnd', []); await frames(4);
+  } else fail('touch: HUD pause button not found');
+  await touch('touchEnd', []);
+}
+await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false }).catch(() => {});
+
 // ---- performance sample while playing (software GL under CI/Xvfb is NOT representative of a Steam Deck) ----
 const perf = await page.evaluate(() => new Promise((res) => {
   const ts = []; let last = performance.now(); const end = last + 6000;

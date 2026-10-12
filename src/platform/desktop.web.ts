@@ -190,6 +190,12 @@ export function installDesktopShell(): void {
   if (installed || typeof window === 'undefined' || typeof document === 'undefined') return;
   installed = true;
   installStyle();
+  // Pausing while the browser is still starting a sound rejects play() with an AbortError. It is a harmless, well-known race (the sound is
+  // simply not played); keep it out of the console so real errors stay visible.
+  window.addEventListener('unhandledrejection', (e) => {
+    const r = e.reason as { name?: string; message?: string } | undefined;
+    if (r?.name === 'AbortError' && /play\(\) request was interrupted/.test(r.message ?? '')) e.preventDefault();
+  });
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || (e.altKey && e.key === 'Enter')) return;       // leave browser/Electron shortcuts alone
     if (!(e.code === 'F2')) prompts.note('kb', performance.now());

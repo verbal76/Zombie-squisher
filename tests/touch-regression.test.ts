@@ -130,6 +130,7 @@ test('Android path: ControlPad uses the shared handlers, cleans up on releaseSig
   assert.match(pad, /applyHold\(input\.current, kind, on\)/);
   assert.match(pad, /applyTap\(input\.current, kind\)/);
   assert.match(pad, /if \(releaseSignal > 0\) tracker\.releaseAll\(\)/, 'pause/About/game-over release every touch');
+  assert.match(pad, /onResponderEnd=\{onTouches\}/, 'a finger lifted while others stay down is reported (RN sends touchEnd, not a move, for it)');
   assert.match(pad, /const tracker = useMemo\(\(\) => new TouchTracker\(layout, handlers\), \[\]\)/, 'one tracker for the life of the pad, as before');
   assert.doesNotMatch(pad, /platform\/desktop|document\.|window\.|navigator\./);
 });
@@ -157,4 +158,17 @@ test('Android emulator smoke injects real touches and observes the ControlPad st
   const sh = read('tools/emulator-smoke.sh');
   for (const needle of ['input swipe "$RX" "$RY" "$RX" "$RY"', 'steerRight active', 'gearReverse', 'gunsToggle active', 'touch_note']) assert.ok(sh.includes(needle), needle);
   assert.doesNotMatch(sh.split('touch_note()')[1].split('adb shell dumpsys meminfo')[0], /\bfail "/, 'the touch checks report; they must not be able to fail a valid build');
+});
+
+test('multi-touch: a lifted finger is released by the End event even when the remaining finger never moves (RN event order)', () => {
+  const r = rig(2400, 1080, { top: 0, right: 48, bottom: 24, left: 48 });
+  const right = r.pt(1, 'steerRight'), turbo = r.pt(2, 'turbo');
+  r.tracker.update([right], [right]);                       // grant
+  r.tracker.update([right, turbo], [turbo]);                // second finger down (reported with the next event)
+  assert.deepEqual([r.input.steerRight, r.input.turbo], [true, true]);
+  r.tracker.update([turbo], [right]);                       // onResponderEnd: touches = remaining, changedTouches = the lifted finger
+  assert.deepEqual([r.input.steerRight, r.input.turbo], [false, true], 'only the lifted finger releases');
+  r.tracker.update([], [turbo]);                            // last finger up (End) followed by Release
+  r.tracker.releaseAll();
+  assert.deepEqual([r.input.steerRight, r.input.turbo], [false, false]);
 });

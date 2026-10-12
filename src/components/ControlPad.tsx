@@ -58,6 +58,7 @@ export function ControlPad({ layout, input, releaseSignal, bus }: Props) {
       onMoveShouldSetResponder={wants}
       onResponderGrant={onTouches}
       onResponderMove={onTouches}
+      onResponderEnd={onTouches}
       onResponderRelease={onEnd}
       onResponderTerminate={onEnd}
     >
