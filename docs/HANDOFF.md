@@ -51,7 +51,7 @@ Android 12+ system splash = background `#0d0805` with a transparent icon → in-
 ## Release engineering
 - `tools/apk-name.js` names artifacts `<Game>-v<version>.apk`; `tools/verify-apk.sh` checks identity, targetSdk ≥ 35, forbidden permissions, v2/v3 signature, **signer == build #76 key**, `zipalign -P 16`, ELF LOAD alignment ≥ 16 KB (arm64-v8a, x86_64); `tools/emulator-smoke.sh` installs and drives the APK on an API 34 emulator (splash frames, DRIVE, steering, About diagnostics: models loaded/frames/errors, logcat crash scan, background/foreground + auto-pause).
 - Version identity: `version` 1.1.0 (= OTA runtime) / `versionCode` 2 (build #76 shipped 1). Never change `version` without shipping an APK.
-- **OTA / releases:** nothing publishes automatically any more. `eas-update.yml` and `android-build.yml` are `workflow_dispatch` only; an OTA needs a run on the pipeline branch with `confirm=PUBLISH-OTA`, a release needs `publish` + `confirm=PUBLISH-RELEASE` (see README "Release authorization"). Merging this PR into the pipeline branch therefore publishes nothing; the owner publishes an OTA/release separately and deliberately. An OTA reaches only runtime 1.1.0 installs (never the old 1.0.0 APK).
+- **OTA / releases:** nothing publishes automatically any more. `eas-update.yml` and `build.yml` are `workflow_dispatch` only; an OTA needs a run on the pipeline branch with `confirm=PUBLISH-OTA`, a release is `build.yml` with `destination=github_releases` (see `docs/RELEASES.md`). Merging this PR into the pipeline branch therefore publishes nothing; the owner publishes an OTA/release separately and deliberately. An OTA reaches only runtime 1.1.0 installs (never the old 1.0.0 APK).
 - The manual candidate workflow uses `secrets.ZOMBIE` so candidates are signed with the real key and update an installed 1.0.0 in place (progress kept). No release, no OTA from those runs.
 
 ## Data for the owner (design judgement, not changed)
@@ -64,7 +64,7 @@ See `agentic docs/KNOWN_ISSUES.md`. Not verifiable without a device: real-device
 
 ## Owner physical test (the only remaining gate)
 Candidate: source `384f100` (game code identical to the PR head; later commits are CI/docs only). Get the APK from Actions artifact
-`Zombie-Squisher-v1.1.0` of run 37252267966 (expires 2026-11-04; rebuild with `android-candidate.yml` if gone), SHA-256
+`Zombie-Squisher-v1.1.0` of run 37252267966 (expires 2026-11-04; rebuild with `build.yml` (`platform=android`, `destination=local_only`) if gone), SHA-256
 `ad89f08afc39e89ec83ad6864a1b82ddc621b59d0a314a124d05a421ae09f1a0`. It is signed with the shipped key, so it installs over build #76 and keeps progress.
 Please check on a real phone, in landscape, and report only what looks wrong:
 1. Install over the old app: opens, Hot Attic Games splash, menu, progress/garage data still present.

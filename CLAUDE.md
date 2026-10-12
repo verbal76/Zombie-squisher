@@ -18,11 +18,11 @@ nobody asked for; re-running to see whether something intermittent passes; rebui
 verified artifact (reuse it); release validation for docs, comments or bookkeeping.
 
 **How this repo is wired (keep it that way):**
-- `android-candidate.yml` is **manual only** (`workflow_dispatch`; optional emulator smoke input). Never on push.
+- `build.yml` is the one coordinated build: **manual only**, `destination = local_only` by default. Never on push.
 - `ci.yml` runs on **pull requests only**, skips docs-only changes, cancels superseded runs.
 - `build-apk.yml` (reusable) keeps every release gate: identity, signer fingerprint, target SDK, forbidden
   permissions, 16 KB alignment. Never weaken them to save minutes.
-- `eas-update.yml` (OTA) and `android-build.yml` (release/AAB) are **manual only**; see "Release authorization".
+- `eas-update.yml` (OTA) and `build.yml` (builds/releases) are **manual only**; see "Release authorization".
 - Batch changes and push once; do not push iteratively to "see what CI says". Reuse an existing artifact for a SHA.
 
 Never bypass signing, runtime/OTA compatibility, rollback protection or release gates to save minutes.
@@ -56,16 +56,19 @@ We develop ONE GAME that can have several build targets, never separate per-plat
 
 ## Release authorization (permanent)
 
-Building, testing, merging and publishing are separate operations. **No push, merge, PR, tag, version or docs change may
-publish anything.**
+Building, testing, merging and publishing are separate operations. **No push, merge, PR, tag, version or docs change may publish
+anything or start an expensive build.** (Studio master standard v2.0: one source line, three platform targets, one coordinated build
+number, one GitHub Release, no accidental publishing.)
 
-- `eas-update.yml` and `android-build.yml` have exactly one trigger, `workflow_dispatch`. Do not add `push`, `pull_request`,
-  `tags`, `release`, `schedule`, `workflow_run` or `workflow_call` triggers to them, and do not make any other workflow
-  call them or run `eas update` / create releases (`tests/provenance.test.ts` fails if you do).
+- `eas-update.yml` and `build.yml` have exactly one trigger, `workflow_dispatch` (`ci.yml`: pull requests; `build-apk.yml`: `workflow_call`).
+  Do not add `push`, `tags`, `release`, `schedule`, `workflow_run` triggers, and do not run `eas update` / create releases anywhere else
+  (`tests/provenance.test.ts` fails if you do).
+- A `build.yml` run authorizes exactly the platforms and destination chosen in its inputs (`platform`, `source_sha`, `build_number`,
+  `destination`) and nothing else: no OTA, no Steam, no Google Play, no merge. `destination = github_releases` additionally needs the commit in
+  the `Github-build-pipeline-zombie-crusher` lineage. Build numbers are monotonic and never reused (`tools/release-names.js`).
 - Publishing an OTA needs: run on `Github-build-pipeline-zombie-crusher`, `confirm = PUBLISH-OTA`, tests green first.
-  Publishing a release needs: that branch, `publish` ticked, `confirm = PUBLISH-RELEASE`. Agents never dispatch these
-  without the owner's explicit instruction in the current conversation; a general "continue" is not authorization.
-- Release tags are created by `tools/tag-release.sh` on the built SHA and re-checked after publication; releases are
-  gated by `tools/verify-release-source.js` (manifest SHA == embedded commit == run SHA == artifact digest). Never move
-  or delete historical `apk-build-*` tags (see `docs/BRANCH_LEDGER.md`).
-- Development artifacts: `android-candidate.yml` or `android-build.yml` with `publish` unticked. They never reach players.
+- **Agents never dispatch builds, releases or OTAs without the owner's explicit instruction in the current conversation**; "continue" is not authorization.
+- Releases: tag `build-NN` created by `tools/tag-release.sh` on the built SHA and re-checked afterwards; `tools/assemble-release.js` proves one SHA +
+  one build number across platforms and recomputes artifact digests. Never move or delete historical `apk-build-*` tags (see `docs/BRANCH_LEDGER.md`).
+- Required docs (keep concise and true): `docs/PLATFORM_SUPPORT.md`, `UPDATES.md`, `RELEASES.md`, `STEAM_HARDWARE_CHECKLIST.md`, `BRANCH_LEDGER.md`,
+  `THIRD_PARTY_ASSETS.md`. Never claim physical-device, Windows or Steam Deck testing that did not happen.

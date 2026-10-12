@@ -16,15 +16,14 @@ Built with Expo SDK 54 + React Native 0.81 + React 19 + three.js (react-three-fi
 ## Pipelines
 
 ### Release authorization (nothing publishes automatically)
-A push, merge, pull request, tag, version bump or docs change never publishes anything. Building, merging and
-publishing are separate, explicit operations (Actions tab -> Run workflow):
+A push, merge, pull request, tag, version bump or docs change never publishes or builds anything expensive. Building, merging and
+publishing are separate, explicit operations (Actions tab -> Run workflow). Full detail: `docs/RELEASES.md`.
 
 | Operation | Workflow | How |
 |---|---|---|
 | Fast checks | `ci.yml` | automatic on pull requests (skips docs-only) |
-| Development APK (never reaches players) | `android-candidate.yml` | manual; any branch; optional emulator smoke |
-| Release-line APK / store AAB build | `android-build.yml` | manual, `publish` unticked (default): builds, verifies, uploads a 14-day artifact |
-| Publish a GitHub Release | `android-build.yml` | manual on the pipeline branch, `publish` ticked **and** `confirm = PUBLISH-RELEASE` |
+| Android APK / Windows ZIP / Linux TAR.GZ (one SHA, one build number) | `build.yml` | manual: `platform`, `source_sha`, `build_number`, `destination = local_only` (default) |
+| Publish one GitHub Release `Zombie Squisher Build NN` | `build.yml` | same, `destination = github_releases`, source must be in the release-branch lineage |
 | Publish an OTA | `eas-update.yml` | manual on the pipeline branch, choose channel, `confirm = PUBLISH-OTA` |
 
 An OTA reaches only installs whose native runtime equals `app.json` `version` (policy `appVersion`); a change that needs
@@ -88,8 +87,8 @@ tools/                        # apk-name.js, verify-apk.sh, emulator-smoke.sh, u
 .github/workflows/
   ci.yml                      # typecheck + tests + bundle + prebuild + UI preview, every branch/PR (no secrets)
   build-apk.yml               # reusable: signed APK -> name -> verify (identity/signer/16 KB) -> emulator smoke test
-  android-candidate.yml       # runs build-apk.yml on ccr-** / candidate/** branches (no release, no OTA)
-  android-build.yml           # pipeline branch: build-apk.yml + GitHub Release; v* tags -> production AAB
+  build.yml                   # THE manual coordinated build (Android + Windows + Linux, one SHA/build number, optional release)
+  build-apk.yml               # reusable Android build + identity/signer/16 KB gates + optional emulator smoke
   eas-update.yml              # OTA publisher (pipeline branch only)
 ```
 

@@ -53,8 +53,9 @@ rewriting shared references, so they are left and this table is the record. Fixe
 
 ## Enforcement added
 
-- Publishing is manual and typed-confirmed (`PUBLISH-RELEASE`, `PUBLISH-OTA`) on the pipeline branch only; no event
-  publishes. Release tags are created on the built SHA by `tools/tag-release.sh` and re-checked after publication.
+- Publishing is manual: OTA needs `PUBLISH-OTA` on the pipeline branch; releases are `build.yml destination=github_releases` for commits in
+  the pipeline lineage; no event publishes. Release tags `build-NN` are created on the built SHA by `tools/tag-release.sh` and re-checked.
+  (`android-build.yml`, `android-candidate.yml` and the first `multiplatform-build.yml` were retired in favour of `build.yml`; their history is in git.)
 - The store-bundle (AAB) job refuses a commit that is not an ancestor of the pipeline branch.
 - Every APK ships `build-manifest.json` (source SHA, ref, version, runtime version, platform, profile, toolchain,
   timestamp, APK SHA-256) and the build fails if the embedded commit differs from `GITHUB_SHA`.
