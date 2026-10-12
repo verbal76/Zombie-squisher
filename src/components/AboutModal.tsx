@@ -86,6 +86,8 @@ export function AboutModal({ visible, onClose }: Props) {
 
   const lines: Array<[string, string]> = [
     ['Game',                `${BUILD_INFO.gameName} v${BUILD_INFO.appVersion}`],
+    ['Game build',          BUILD_INFO.buildNumber === null ? 'dev build' : `Build ${BUILD_INFO.buildNumber}`],
+    ['Platform',            BUILD_INFO.platform],
     ['APK file',            BUILD_INFO.apkFileName],
     ['CI run',              BUILD_INFO.ciRun === null ? 'local' : `#${BUILD_INFO.ciRun}`],
     ['Build',               BUILD_VERSION],

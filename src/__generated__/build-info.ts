@@ -6,6 +6,8 @@ export interface BuildInfo {
   dirty: boolean; builtAt: string;
   appVersion: string; androidVersionCode: number | null;
   ciRun: number | null; apkFileName: string;
+  platform: string; refType: string; runtimeVersion: string; buildNumber: number | null;
+  toolchain: { node: string; expo: string; reactNative: string; three: string };
   buildId: string; otaId: string;
 }
 export const BUILD_INFO: BuildInfo = {
@@ -19,6 +21,11 @@ export const BUILD_INFO: BuildInfo = {
   "androidVersionCode": 2,
   "ciRun": null,
   "apkFileName": "Zombie-Squisher-v1.1.0.apk",
+  "platform": "android",
+  "refType": "local",
+  "runtimeVersion": "1.1.0",
+  "buildNumber": null,
+  "toolchain": { "node": "unknown", "expo": "unknown", "reactNative": "unknown", "three": "unknown" },
   "buildId": "build unknown (unknown)",
   "otaId": "OTA unknown @ 1970-01-01T00:00:00.000Z"
 };
