@@ -64,7 +64,10 @@ export interface UpgradeStats {
 }
 
 export interface Progress {
+  /** Spendable kill bank (vehicles and upgrades are paid from it). */
   totalKills: number;
+  /** Every kill ever earned; never decreases. Weapon / side-mod / ability unlocks are measured against this. */
+  lifetimeKills: number;
   bestRunKills: number;
   unlockedVehicles: VehicleId[];
   unlockedWeapons: WeaponId[];

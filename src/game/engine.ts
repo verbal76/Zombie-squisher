@@ -43,6 +43,10 @@ export interface World {
   streakBannerKind: StreakBannerKind;
   streakBannerAt: number;
   momentum: number;
+  /** Monotonic counters read by the audio layer (never reset during a run). */
+  shotCount: number;
+  lastShotKind: ProjectileKind | null;
+  hitCount: number;
 }
 
 export type StreakBannerKind = 'spree' | 'reaper' | 'breaker' | 'apocalypse' | null;
@@ -55,6 +59,9 @@ export const ZOMBIE_FLEE_STREAK = 10;
 // world fills up fast; capping prevents unbounded growth that would tank
 // performance. 500 lets the horde feel dense without crashing the render.
 export const MAX_ACTIVE_ZOMBIES = 500;
+
+// Blood decals are purely visual; keep the oldest from piling up when a horde dies at once.
+export const MAX_BLOOD_SPOTS = 300;
 
 // Each zombie struck by the front/rear bumper bleeds this fraction off
 // the car's speed (cumulative across all zombies hit this tick). Plowing
@@ -86,7 +93,13 @@ export function deriveStats(p: Progress): { vehicle: Vehicle; stats: DerivedStat
   const vehicle = VEHICLES[p.selectedVehicle];
   const weapon = WEAPONS[p.selectedWeapon];
 
-  const u = { speed: 0, armor: 0, handling: 0, acceleration: 0, ...(p.upgrades[vehicle.id] ?? {}) };
+  const saved = p.upgrades[vehicle.id];
+  const u = {
+    speed: saved?.speed ?? 0,
+    armor: saved?.armor ?? 0,
+    handling: saved?.handling ?? 0,
+    acceleration: saved?.acceleration ?? 0,
+  };
   const acceleration = vehicle.baseAcceleration + u.acceleration * 40;
 
   const stats: DerivedStats = {
@@ -141,6 +154,9 @@ export function createWorld(width: number, height: number, p: Progress): World {
     streakBannerKind: null,
     streakBannerAt: 0,
     momentum: 0,
+    shotCount: 0,
+    lastShotKind: null,
+    hitCount: 0,
   };
 }
 
@@ -178,6 +194,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
     if (p.selectedAbility === 'emp') {
       for (const z of world.zombies) {
+        if (z.hp <= 0) continue;
         if (z.kind === 'boss') {
           z.hp -= 200;
         } else if (z.maxHp <= 60) {
@@ -185,6 +202,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
         } else {
           z.vy *= 0.2;
         }
+        if (z.hp <= 0) registerKill(world, z);
       }
       world.shake = 14;
     }
@@ -205,6 +223,10 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
   const LAT_GRIP_TURN     = 2.5;
   const COAST_DAMP        = 0.5;
   const SKID_INJECTION    = 35;
+
+  // Per-contact tuning values below were authored per 60 fps frame; scale them
+  // by elapsed frames so damage and slowdown are the same at any frame rate.
+  const frames = dt * 60;
 
   const turboMul = input.turbo ? TURBO_MULTIPLIER : 1;
   const maxSpeed = stats.speed * nitroMul * turboMul;
@@ -392,7 +414,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
       if (isBumperImpact) {
         const speedScale = Math.max(1, Math.min(2, carSpeed / Math.max(1, stats.speed * 0.4)));
-        z.hp -= stats.bumperDamage * bumperBonus * speedScale;
+        z.hp -= stats.bumperDamage * bumperBonus * speedScale * frames;
 
         const inv = 1 / Math.max(1, carSpeed);
         const knockback = 80 + speedScale * 40;
@@ -402,9 +424,10 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
 
         // Per-hit slowdown: every zombie struck bleeds momentum so a
         // dense horde can stall the car.
-        world.forwardV *= PER_HIT_SLOW;
-        world.carVx   *= PER_HIT_SLOW;
-        world.carVy   *= PER_HIT_SLOW;
+        const hitSlow = Math.pow(PER_HIT_SLOW, frames);
+        world.forwardV *= hitSlow;
+        world.carVx   *= hitSlow;
+        world.carVy   *= hitSlow;
 
         if (z.hp <= 0) {
           world.shake = Math.min(24, world.shake + 2 + speedScale);
@@ -414,6 +437,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
         if (!isShielded && world.invuln <= 0) {
           world.hp -= def.contactDamage * 0.4;
           world.invuln = 120;
+          world.hitCount += 1;
         }
       } else {
         // Side hit (any speed) OR slow contact at the bumper. Either
@@ -426,6 +450,7 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
         if (z.attackCooldown <= 0) {
           if (!isShielded) {
             world.hp -= def.contactDamage * 0.6;
+            world.hitCount += 1;
           }
 
           z.attackCooldown = 0.5;
@@ -439,13 +464,13 @@ export function step(world: World, dt: number, input: UpdateInput, p: Progress):
     }
 
     if (sideBoxL && hits(z, sideBoxL)) {
-      z.hp -= sideMod.damage;
+      z.hp -= sideMod.damage * frames;
       if (z.hp <= 0) registerKill(world, z);
       continue;
     }
 
     if (sideBoxR && hits(z, sideBoxR)) {
-      z.hp -= sideMod.damage;
+      z.hp -= sideMod.damage * frames;
       if (z.hp <= 0) registerKill(world, z);
     }
   }
@@ -540,6 +565,10 @@ function spawnBlood(world: World, z: Zombie): void {
       alpha: 0.85,
     });
   }
+
+  if (world.bloodSpots.length > MAX_BLOOD_SPOTS) {
+    world.bloodSpots.splice(0, world.bloodSpots.length - MAX_BLOOD_SPOTS);
+  }
 }
 
 function intentFor(z: Zombie, dst: number, streak: number): number {
@@ -614,6 +643,8 @@ function spawnZombie(world: World, forceBoss: boolean): void {
 }
 
 function fireWeapon(world: World, weapon: Weapon, vehicle: Vehicle): void {
+  world.shotCount += 1;
+  world.lastShotKind = weapon.id === 'rockets' ? 'rocket' : (weapon.id as ProjectileKind);
   const fwdX = Math.sin(world.heading);
   const fwdY = -Math.cos(world.heading);
   const muzzleDist = vehicle.height / 2 + 4;

@@ -1,14 +1,9 @@
 name: Prune Artifacts
-# Keep only the 3 most recent artifacts repo-wide so we stay under the
-# storage quota. Runs daily, manually, and after every Android APK build.
+# Manual housekeeping only: keep the 3 most recent artifacts repo-wide to stay under the storage quota.
+# (Not automatic: build artifacts have 14-day retention and an automatic prune could delete a build's own files.)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 6 * * *'
-  workflow_run:
-    workflows: ['Android APK (GitHub Runner)']
-    types: [completed]
 
 permissions:
   actions: write

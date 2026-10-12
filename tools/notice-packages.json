@@ -1,0 +1,184 @@
+{
+ "@babel/runtime": [
+  "sm-and",
+  "sm-web"
+ ],
+ "@react-native-async-storage/async-storage": [
+  "sm-and",
+  "sm-web"
+ ],
+ "@react-native/assets-registry": [
+  "sm-and"
+ ],
+ "@react-native/js-polyfills": [
+  "sm-and",
+  "sm-web"
+ ],
+ "@react-native/normalize-colors": [
+  "sm-and"
+ ],
+ "@react-three/fiber": [
+  "sm-and",
+  "sm-web"
+ ],
+ "@ungap/structured-clone": [
+  "sm-and"
+ ],
+ "abort-controller": [
+  "sm-and"
+ ],
+ "base64-js": [
+  "sm-and"
+ ],
+ "buffer": [
+  "sm-and"
+ ],
+ "css-in-js-utils": [
+  "sm-web"
+ ],
+ "event-target-shim": [
+  "sm-and"
+ ],
+ "expo": [
+  "sm-and",
+  "sm-web"
+ ],
+ "expo-asset": [
+  "sm-and",
+  "sm-web"
+ ],
+ "expo-audio": [
+  "sm-and",
+  "sm-web"
+ ],
+ "expo-constants": [
+  "sm-and"
+ ],
+ "expo-file-system": [
+  "sm-and"
+ ],
+ "expo-gl": [
+  "sm-and"
+ ],
+ "expo-modules-core": [
+  "sm-and",
+  "sm-web"
+ ],
+ "expo-splash-screen": [
+  "sm-and",
+  "sm-web"
+ ],
+ "expo-status-bar": [
+  "sm-and",
+  "sm-web"
+ ],
+ "expo-updates": [
+  "sm-and",
+  "sm-web"
+ ],
+ "fbjs": [
+  "sm-web"
+ ],
+ "hyphenate-style-name": [
+  "sm-web"
+ ],
+ "ieee754": [
+  "sm-and"
+ ],
+ "inline-style-prefixer": [
+  "sm-web"
+ ],
+ "invariant": [
+  "sm-and",
+  "sm-web"
+ ],
+ "is-plain-obj": [
+  "sm-web"
+ ],
+ "its-fine": [
+  "sm-and",
+  "sm-web"
+ ],
+ "memoize-one": [
+  "sm-and"
+ ],
+ "merge-options": [
+  "sm-web"
+ ],
+ "nullthrows": [
+  "sm-and",
+  "sm-web"
+ ],
+ "pako": [
+  "sm-and",
+  "sm-web"
+ ],
+ "postcss-value-parser": [
+  "sm-web"
+ ],
+ "promise": [
+  "sm-and"
+ ],
+ "punycode": [
+  "sm-and"
+ ],
+ "react": [
+  "sm-and",
+  "sm-web"
+ ],
+ "react-dom": [
+  "sm-web"
+ ],
+ "react-native": [
+  "sm-and"
+ ],
+ "react-native-safe-area-context": [
+  "sm-and",
+  "sm-web"
+ ],
+ "react-native-web": [
+  "sm-web"
+ ],
+ "regenerator-runtime": [
+  "sm-and"
+ ],
+ "scheduler": [
+  "sm-and",
+  "sm-web"
+ ],
+ "stacktrace-parser": [
+  "sm-and"
+ ],
+ "styleq": [
+  "sm-web"
+ ],
+ "suspend-react": [
+  "sm-and",
+  "sm-web"
+ ],
+ "three": [
+  "sm-and",
+  "sm-web"
+ ],
+ "upng-js": [
+  "sm-and",
+  "sm-web"
+ ],
+ "use-sync-external-store": [
+  "sm-and",
+  "sm-web"
+ ],
+ "webidl-conversions": [
+  "sm-and"
+ ],
+ "whatwg-fetch": [
+  "sm-and"
+ ],
+ "whatwg-url-without-unicode": [
+  "sm-and"
+ ],
+ "zustand": [
+  "sm-and",
+  "sm-web"
+ ]
+}

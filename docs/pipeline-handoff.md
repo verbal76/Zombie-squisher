@@ -1,3 +1,5 @@
+> HISTORICAL: describes the pre-October-2026 pipeline (auto OTA/APK on push). Superseded by `docs/RELEASES.md`, `docs/UPDATES.md` and `CLAUDE.md`; kept for archaeology only.
+
 # Mobile App Pipeline: OTA + APK via GitHub Actions
 
 This is the standard deployment pipeline for any Expo / React Native project

@@ -1,0 +1,16 @@
+{
+  "name": "zombie-squisher-desktop",
+  "productName": "Zombie Squisher",
+  "version": "1.1.0",
+  "description": "Desktop (Windows / Linux / Steam Deck) shell for Zombie Squisher: runs the shared game, exported for the web, inside Electron.",
+  "main": "main.js",
+  "private": true,
+  "author": "Hot Attic Games",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "electron": "38.3.0",
+    "png-to-ico": "^3.0.2",
+    "resedit": "^3.1.0"
+  }
+}

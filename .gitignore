@@ -20,10 +20,7 @@ android/
 assets/icon.png
 assets/adaptive-icon.png
 
-# npm lockfile is intentionally NOT committed in this repo. Workflows use
-# `npm install` (not `npm ci`) and skip `cache: npm` on setup-node — both
-# would require a committed lock. Revisit if CI minutes become a constraint.
-package-lock.json
+# The npm lockfile IS committed (reproducible builds across the SDK 54 upgrade).
 npm-shrinkwrap.json
 yarn.lock
 
@@ -32,3 +29,9 @@ yarn.lock
 # so the build scripts (zombify-character-textures, embed-zombie-textures,
 # encode-glb-to-ts) can be re-run.
 assets/characters/
+
+# Desktop shell
+desktop/node_modules/
+dist-desktop/
+dist-linux/
+dist-windows/
